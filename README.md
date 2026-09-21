@@ -115,9 +115,17 @@ npm run dev     # server (3000) + Mini App (5173)
 
 ### A. Mini App → Vercel
 
-1. Vercel’da yangi loyiha yarating va **Root Directory’ni o‘zgartirmang** (repo ildizi).
-   Ildizdagi `vercel.json` hamma narsani o‘zi sozlaydi: faqat Mini App quriladi,
-   bot paketining og‘ir bog‘liqliklari o‘rnatilmaydi.
+Ikkala sozlash ham ishlaydi — qaysi biri qulay bo‘lsa:
+
+| Root Directory | Qaysi konfiguratsiya ishlaydi | Qo‘shimcha shart |
+|---|---|---|
+| **bo‘sh (repo ildizi)** — tavsiya | ildizdagi `vercel.json` | yo‘q |
+| `packages/web` | `packages/web/vercel.json` | Settings’da **“Include source files outside of the Root Directory”** yoqilgan bo‘lsin |
+
+1. Vercel’da yangi loyiha yarating (tavsiya: Root Directory’ni bo‘sh qoldiring).
+   Konfiguratsiya fayli build va chiqish papkasini o‘zi sozlaydi — Project Settings’dagi
+   **Build Command / Output Directory maydonlarini bo‘sh qoldiring** (qo‘lda yozilgan qiymat
+   chalkashlik keltirib chiqaradi).
 2. Environment Variables:
 
    | Kalit | Qiymat |
@@ -126,6 +134,21 @@ npm run dev     # server (3000) + Mini App (5173)
 
 3. Deploy’dan keyin Vercel bergan manzilni (masalan `https://testrace.vercel.app`) eslab qoling —
    u bot serverida `WEBAPP_URL` bo‘lib ketadi.
+
+<details>
+<summary><b>Xatolik: “No Output Directory named dist found”</b></summary>
+
+Vercel `vercel.json` ni **Root Directory ichidan** qidiradi. Agar Root Directory `packages/web`
+bo‘lsa, ildizdagi fayl o‘qilmaydi (va aksincha). Tekshiring:
+
+1. Project Settings → **Root Directory**: bo‘sh (repo ildizi) yoki `packages/web`.
+2. Settings → Build & Development Settings → **Output Directory** maydoni bo‘sh bo‘lsin
+   (qo‘lda yozilgan qiymat `vercel.json` bilan to‘qnashadi).
+3. `packages/web` ni tanlagan bo‘lsangiz — **“Include source files outside of the Root Directory”**
+   yoqilgan bo‘lsin, chunki umumiy kod `packages/shared` da turadi.
+4. Sozlamani o‘zgartirgach **Redeploy** qiling (cache’siz).
+
+</details>
 
 ### B. Bot + API → Render (yoki Railway / VPS)
 
