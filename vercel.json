@@ -1,6 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "//": "Vercel'da FAQAT Mini App (frontend) joylashtiriladi. Bot + API alohida serverda turadi — README ga qarang.",
   "installCommand": "npm install --workspace @testrace/web --workspace @testrace/shared --include-workspace-root",
   "buildCommand": "npm run build -w @testrace/web",
   "outputDirectory": "packages/web/dist",
