@@ -1,0 +1,31 @@
+{
+  "name": "testrace",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram test-musobaqa boti: PDF/Word/matndan test shablonlari + guruhda musobaqa rejimi",
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev -w @testrace/server\" \"npm run dev -w @testrace/web\"",
+    "build": "npm run build -w @testrace/shared && npm run build -w @testrace/server && npm run build -w @testrace/web",
+    "start": "npm run start -w @testrace/server",
+    "fonts": "node scripts/fetch-fonts.mjs",
+    "tunnel": "node scripts/tunnel.mjs",
+    "typecheck": "tsc -b packages/shared packages/server && npm run typecheck -w @testrace/web",
+    "test": "npm run smoke -w @testrace/server && npm run smoke:race -w @testrace/server",
+    "smoke": "npm run smoke -w @testrace/server",
+    "smoke:race": "npm run smoke:race -w @testrace/server",
+    "clean": "node -e \"const fs=require('fs');for(const d of ['packages/shared/dist','packages/server/dist','packages/web/dist'])fs.rmSync(d,{recursive:true,force:true});\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

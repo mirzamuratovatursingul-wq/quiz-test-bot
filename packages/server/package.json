@@ -1,0 +1,41 @@
+{
+  "name": "@testrace/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -b",
+    "start": "node dist/index.js",
+    "check:parser": "tsx src/scripts/check-parser.ts",
+    "check:output": "tsx src/scripts/check-output.ts",
+    "smoke": "tsx src/scripts/smoke-api.ts",
+    "smoke:race": "tsx src/scripts/smoke-race.ts",
+    "preview:ui": "tsx src/scripts/preview-ui.ts",
+    "db:clean": "tsx src/scripts/db-clean.ts",
+    "check:prod": "tsx src/scripts/check-prod.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@fastify/multipart": "^9.0.3",
+    "@fastify/static": "^8.0.4",
+    "@napi-rs/canvas": "^0.1.65",
+    "@testrace/shared": "*",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "grammy": "^1.34.0",
+    "mammoth": "^1.9.0",
+    "mongoose": "^8.9.5",
+    "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.16.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "@types/pdfkit": "^0.13.9",
+    "mongodb-memory-server": "^11.2.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

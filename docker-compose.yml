@@ -1,0 +1,27 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: testrace-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo-data:/data/db
+
+  app:
+    build: .
+    container_name: testrace-app
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    env_file: .env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/testrace
+      NODE_ENV: production
+      HOST: 0.0.0.0
+    ports:
+      - '3000:3000'
+    profiles: ['full']
+
+volumes:
+  mongo-data:
