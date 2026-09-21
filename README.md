@@ -119,8 +119,8 @@ Ikkala sozlash ham ishlaydi — qaysi biri qulay bo‘lsa:
 
 | Root Directory | Qaysi konfiguratsiya ishlaydi | Qo‘shimcha shart |
 |---|---|---|
-| **bo‘sh (repo ildizi)** — tavsiya | ildizdagi `vercel.json` | yo‘q |
-| `packages/web` | `packages/web/vercel.json` | Settings’da **“Include source files outside of the Root Directory”** yoqilgan bo‘lsin |
+| **bo‘sh (repo ildizi)** — tavsiya | ildizdagi `vercel.json` → `dist/` | yo‘q |
+| `packages/web` | `packages/web/vercel.json` → `packages/web/dist/` | Settings’da **“Include source files outside of the Root Directory”** yoqilgan bo‘lsin |
 
 1. Vercel’da yangi loyiha yarating (tavsiya: Root Directory’ni bo‘sh qoldiring).
    Konfiguratsiya fayli build va chiqish papkasini o‘zi sozlaydi — Project Settings’dagi
@@ -137,6 +137,10 @@ Ikkala sozlash ham ishlaydi — qaysi biri qulay bo‘lsa:
 
 <details>
 <summary><b>Xatolik: “No Output Directory named dist found”</b></summary>
+
+Build natijasi endi <b>har doim</b> repo ildizidagi `dist/` ga ham nusxalanadi
+(`scripts/mirror-web-dist.mjs`), shuning uchun Vercel qaysi sozlamani ishlatishidan qat’i nazar
+papkani topadi. Agar xato baribir chiqsa:
 
 Vercel `vercel.json` ni **Root Directory ichidan** qidiradi. Agar Root Directory `packages/web`
 bo‘lsa, ildizdagi fayl o‘qilmaydi (va aksincha). Tekshiring:

@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev -w @testrace/server\" \"npm run dev -w @testrace/web\"",
-    "build": "npm run build -w @testrace/shared && npm run build -w @testrace/server && npm run build -w @testrace/web",
+    "build": "npm run build -w @testrace/shared && npm run build -w @testrace/server && npm run build -w @testrace/web && node scripts/mirror-web-dist.mjs",
     "start": "npm run start -w @testrace/server",
     "fonts": "node scripts/fetch-fonts.mjs",
     "tunnel": "node scripts/tunnel.mjs",
@@ -19,7 +19,8 @@
     "test": "npm run smoke -w @testrace/server && npm run smoke:race -w @testrace/server",
     "smoke": "npm run smoke -w @testrace/server",
     "smoke:race": "npm run smoke:race -w @testrace/server",
-    "clean": "node -e \"const fs=require('fs');for(const d of ['packages/shared/dist','packages/server/dist','packages/web/dist'])fs.rmSync(d,{recursive:true,force:true});\""
+    "clean": "node -e \"const fs=require('fs');for(const d of ['packages/shared/dist','packages/server/dist','packages/web/dist'])fs.rmSync(d,{recursive:true,force:true});\"",
+    "build:web": "npm run build -w @testrace/web && node scripts/mirror-web-dist.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
