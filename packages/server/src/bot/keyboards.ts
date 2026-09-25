@@ -117,8 +117,3 @@ export function raceIntroKeyboard(raceId: string): InlineKeyboard {
     .text('▶️ Boshlash', `race:start:${raceId}`)
     .text('✕ Bekor qilish', `race:cancel:${raceId}`);
 }
-
-/** Musobaqa tugagach — shu shablon bilan qayta o'tkazish */
-export function raceFinishedKeyboard(templateId: string, hostId: number): InlineKeyboard {
-  return new InlineKeyboard().text('\u{1F501} Yana bir marta', `race:again:${templateId}:${hostId}`);
-}

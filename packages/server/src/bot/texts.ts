@@ -45,11 +45,12 @@ export const t = {
     `1) Shablonni ochib <b>Guruhda musobaqa oʻtkazish</b>ni bosing`,
     `2) Guruhni tanlang — u yerda <b>Boshlash</b> tugmasi chiqadi`,
     `3) Savollar soʻrovnoma boʻlib tushadi, yakunda gʻoliblar eʼlon qilinadi`,
+    `\u{1F512} Guruhda musobaqani faqat <b>guruh adminlari</b> boshlaydi va toʻxtatadi.`,
     ``,
     `<b>⌨️ Buyruqlar</b>`,
     `/shablonlarim — saqlangan testlar`,
     `/statistika — natijalaringiz`,
-    `Guruhda: /boshlash · /holat · /toxtat`,
+    `Guruhda (adminlar uchun): /boshlash · /toxtat · /holat`,
   ].join('\n'),
 
   fileTooBig: (mb: number) => `⚠️ Fayl juda katta. Chegara — <b>${mb} MB</b>.`,
@@ -61,6 +62,10 @@ export const t = {
     ``,
     `Menga PDF, Word fayl yoki test matnini yuboring — savollarni ajratib, shablon qilib beraman.`,
   ].join('\n'),
+
+  /** Guruhda admin bo'lmagan a'zo musobaqani boshqarmoqchi bo'lganda */
+  adminOnly:
+    '\u{1F512} Botni guruhda ishga tushirmoqchi boʻlsangiz, sizga admin huquqi berilishi kerak. Savollarga esa hamma javob bera oladi.',
 
   groupOnly: 'Bu buyruq guruhlarda ishlaydi.',
   privateOnly: 'Bu buyruq shaxsiy chatda ishlaydi.',

@@ -111,8 +111,9 @@ const mockApi = {
   async getUserProfilePhotos() {
     return { total_count: 0, photos: [] };
   },
-  async getChatMember() {
-    return { status: 'member' };
+  // Faqat shablon egasi guruh admini — qolganlar oddiy a'zo
+  async getChatMember(_chatId: number, userId: number) {
+    return { status: userId === OWNER ? 'administrator' : 'member' };
   },
 };
 
@@ -203,9 +204,12 @@ check(
 
 console.log('\n2) Boshlash');
 const notHost = await engine.start(CHAT_ID, 424242);
-check('begona boshlay olmadi', !notHost.ok, notHost.message);
+check('admin boʻlmagan aʼzo boshlay olmadi', !notHost.ok, notHost.message);
+check('unga admin huquqi kerakligi aytildi', notHost.message.includes('admin huquqi'), notHost.message);
+const notAdminCancel = await engine.cancel(CHAT_ID, ALI.id);
+check('admin boʻlmagan aʼzo toʻxtata olmadi', !notAdminCancel.ok, notAdminCancel.message);
 const started = await engine.start(CHAT_ID, OWNER);
-check('host boshladi', started.ok, started.message);
+check('guruh admini boshladi', started.ok, started.message);
 
 console.log('\n3) 1-savol: quiz soʻrovnomasi');
 check('soʻrovnoma yuborildi', await waitFor(() => polls.length >= 1));
@@ -283,6 +287,12 @@ check(
 check(
   'gʻoliblar 3-2-1 tartibida eʻlon qilindi',
   sent.some((m) => m.text.includes('Yakun') && m.text.includes('\u{1F947}')),
+);
+
+check('oraliq reyting yuborilmadi', !sent.some((m) => m.text.includes('Oraliq reyting')));
+check(
+  'yakunda qayta boshlash tugmasi yoʻq',
+  !sent.some((m) => m.keyboard.some((k) => k.includes('race:again'))),
 );
 
 console.log('\n7) Baza');

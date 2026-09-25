@@ -22,6 +22,8 @@ Backend va frontend — bitta loyiha (monorepo), bitta joydan boshqariladi.
 ### Guruhdagi musobaqa — Telegram’ning o‘zida
 1. Shablon sahifasida **“Guruhga yuborish”** → guruhni tanlaysiz.
 2. Guruhda shablon kartochkasi va bitta **“Boshlash”** tugmasi chiqadi (ro‘yxatdan o‘tish yo‘q).
+   Musobaqani **faqat guruh adminlari** boshlaydi va to‘xtatadi; savollarga hamma javob beradi.
+   Tugagan musobaqani qayta boshlash tugmasi yo‘q.
 3. `3️⃣ 2️⃣ 1️⃣` — savollar **Telegram quiz so‘rovnomasi** ko‘rinishida ketma-ket tushadi:
    - sarlavha **[3/20]-savol**, ostida bo‘sh qator va savol matni; variantlar qalin **𝗔) 𝗕) 𝗖)** harflari bilan,
    - jonli **sekund sanoq** (Telegram o‘zi ko‘rsatadi),
@@ -29,7 +31,7 @@ Backend va frontend — bitta loyiha (monorepo), bitta joydan boshqariladi.
    - har kim **bir marta** javob beradi, javobni **o‘zgartirib bo‘lmaydi**,
    - xato javob berganga darhol **eslatma** chiqadi: ✅ **Javob:** C) Oy va (yozilgan bo‘lsa) 💡 izoh,
    - istalgan a’zo istalgan savoldan qo‘shilib ketaveradi.
-4. Vaqt tugashi bilan keyingi savol tushadi. Har **5 savolda** oraliq reyting chiqadi.
+4. Vaqt tugashi bilan keyingi savol tushadi (savollar orasida oraliq reyting chiqmaydi).
 5. Yakunda: 3 → 2 → 1 tartibida g‘oliblar, profil rasmlari bilan **podium rasmi**, so‘ng
    guruhlarga ajratilgan yakuniy xabar: 🏆 reyting · 📈 umumiy ko‘rsatkichlar · 🔍 e’tiborga loyiq.
    Natijalar shablon egasining profilida saqlanadi.

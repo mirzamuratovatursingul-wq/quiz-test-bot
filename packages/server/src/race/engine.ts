@@ -13,7 +13,8 @@ import { Group, Race, Template, User } from '../db/models.js';
 import { logger } from '../logger.js';
 import { renderPodium, type PodiumEntry } from '../services/podium.service.js';
 import { escapeHtml, fetchUserAvatar } from '../services/telegram.service.js';
-import { raceFinishedKeyboard, raceIntroKeyboard } from '../bot/keyboards.js';
+import { raceIntroKeyboard } from '../bot/keyboards.js';
+import { t } from '../bot/texts.js';
 
 /** Telegram so'rovnoma cheklovlari */
 const POLL_QUESTION_MAX = 300;
@@ -21,8 +22,6 @@ const POLL_OPTION_MAX = 100;
 const POLL_EXPLANATION_MAX = 200;
 /** Savol yopilgandan keyin keyingisigacha tanaffus */
 const NEXT_QUESTION_PAUSE_MS = 1800;
-/** Nechta savoldan keyin oraliq reyting chiqsin */
-const LEADERBOARD_EVERY = 5;
 
 export interface RaceQuestionRuntime {
   text: string;
@@ -221,7 +220,7 @@ export class RaceEngine {
         `\u{1F512} Har kim <b>bir marta</b> javob beradi, oʻzgartirib boʻlmaydi`,
         `\u{1F465} Roʻyxatdan oʻtish shart emas — <b>istalgan savoldan</b> qoʻshiling`,
         '',
-        `\u{1F447} Boshlovchi yoki guruh admini <b>Boshlash</b>ni bosadi.`,
+        `\u{1F447} Guruh admini <b>Boshlash</b>ni bosadi — savollarga hamma javob beradi.`,
       ].join('\n'),
       { parse_mode: 'HTML', reply_markup: raceIntroKeyboard(runtime.raceId) },
     );
@@ -251,8 +250,8 @@ export class RaceEngine {
       return { ok: false, message: 'Bu musobaqa endi faol emas. Yangisi: /boshlash' };
     }
     if (r.status !== 'waiting') return { ok: false, message: 'Musobaqa allaqachon ketmoqda.' };
-    if (!(await this.canManage(chatId, userId, r.hostId))) {
-      return { ok: false, message: 'Faqat musobaqani yuborgan kishi yoki guruh admini boshlaydi.' };
+    if (!(await this.isChatAdmin(chatId, userId))) {
+      return { ok: false, message: t.adminOnly };
     }
 
     r.status = 'running';
@@ -452,44 +451,8 @@ export class RaceEngine {
       return;
     }
 
-    // Har 5 savolda oraliq reyting — musobaqa hissini kuchaytiradi
-    if (r.index % LEADERBOARD_EVERY === 0 && r.participants.size > 0) {
-      await this.sendLeaderboard(chatId, r);
-    }
-
     await sleep(NEXT_QUESTION_PAUSE_MS);
     void this.sendQuestion(chatId);
-  }
-
-  /** Musobaqa davomidagi qisqa reyting */
-  private async sendLeaderboard(chatId: number, r: RaceRuntime) {
-    const ranked = assignPlaces(
-      [...r.participants.values()].map((p) => ({
-        ...p,
-        avgTimeMs: p.answered > 0 ? p.totalTimeMs / p.answered : Number.MAX_SAFE_INTEGER,
-      })),
-    ).slice(0, 5);
-
-    const rows = ranked
-      .map(
-        (p) =>
-          `${medal(p.place)} ${escapeHtml(p.firstName)} — <b>${p.score}</b> ball · ${p.correct} toʻgʻri`,
-      )
-      .join('\n');
-
-    await this.bot.api
-      .sendMessage(
-        chatId,
-        [
-          `\u{1F4CA} <b>Oraliq reyting</b> · ${r.index}/${r.questions.length} savol`,
-          '',
-          rows,
-          '',
-          `\u{1F525} Yana <b>${r.questions.length - r.index}</b> ta savol qoldi!`,
-        ].join('\n'),
-        { parse_mode: 'HTML' },
-      )
-      .catch((err) => logger.debug('Reyting yuborilmadi', err));
   }
 
   /* ---------------------------------------------------------------- */
@@ -518,8 +481,7 @@ export class RaceEngine {
     if (ranked.length === 0) {
       await this.bot.api.sendMessage(
         chatId,
-        '\u{1F3C1} Musobaqa tugadi — hech kim javob bermadi.\n\nYana bir urinib koʻramizmi?',
-        { reply_markup: raceFinishedKeyboard(r.templateId, r.hostId) },
+        '\u{1F3C1} Musobaqa tugadi — hech kim javob bermadi.',
       );
       this.runtimes.delete(chatId);
       return;
@@ -630,10 +592,7 @@ export class RaceEngine {
       .filter((block) => block.trim().length > 0)
       .join('\n\n');
 
-    await this.bot.api.sendMessage(chatId, text, {
-      parse_mode: 'HTML',
-      reply_markup: raceFinishedKeyboard(r.templateId, r.hostId),
-    });
+    await this.bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' });
 
     await this.updateUserStats(ranked, r);
     await Template.updateOne({ _id: r.templateId }, { $inc: { racesCount: 1 } });
@@ -674,8 +633,8 @@ export class RaceEngine {
     if (!r || (raceId && r.raceId !== raceId)) {
       return { ok: false, message: 'Faol musobaqa yoʻq.' };
     }
-    if (!(await this.canManage(chatId, userId, r.hostId))) {
-      return { ok: false, message: 'Faqat boshlovchi yoki guruh admini toʻxtata oladi.' };
+    if (!(await this.isChatAdmin(chatId, userId))) {
+      return { ok: false, message: t.adminOnly };
     }
     r.stopping = true;
     if (r.timer) clearTimeout(r.timer);
@@ -698,10 +657,6 @@ export class RaceEngine {
     };
   }
 
-  /** Boshlovchi yoki guruh admini boshqara oladi */
-  async canManage(chatId: number, userId: number, hostId: number): Promise<boolean> {
-    return userId === hostId || this.isChatAdmin(chatId, userId);
-  }
 
   private participantDocs(r: RaceRuntime, ranked?: (ParticipantRuntime & { place: number })[]) {
     const source = ranked ?? [...r.participants.values()].map((p) => ({ ...p, place: 0 }));
@@ -736,7 +691,8 @@ export class RaceEngine {
     }
   }
 
-  private async isChatAdmin(chatId: number, userId: number): Promise<boolean> {
+  /** Musobaqani faqat guruh adminlari (egasi ham) boshqaradi; javob berish — hammaga ochiq */
+  async isChatAdmin(chatId: number, userId: number): Promise<boolean> {
     try {
       const member = await this.bot.api.getChatMember(chatId, userId);
       return member.status === 'administrator' || member.status === 'creator';

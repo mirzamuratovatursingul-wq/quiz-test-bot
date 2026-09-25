@@ -61,6 +61,10 @@ export function registerGroupHandlers(bot: Bot, engine: RaceEngine) {
       await ctx.reply('⚠️ Shablon topilmadi — ehtimol oʻchirilgan.');
       return;
     }
+    if (!(await engine.isChatAdmin(ctx.chat.id, userId))) {
+      await ctx.reply(t.adminOnly);
+      return;
+    }
     if (template.ownerId !== userId) {
       await ctx.reply('\u{1F512} Bu shablon sizga tegishli emas. Oʻz shablonlaringiz: /boshlash');
       return;
@@ -83,6 +87,11 @@ export function registerGroupHandlers(bot: Bot, engine: RaceEngine) {
     }
     const userId = ctx.from?.id;
     if (!userId) return;
+
+    if (!(await engine.isChatAdmin(ctx.chat.id, userId))) {
+      await ctx.reply(t.adminOnly);
+      return;
+    }
 
     if (engine.isActive(ctx.chat.id)) {
       await ctx.reply('⏳ Bu guruhda musobaqa ketmoqda. Holat: /holat · Toʻxtatish: /toxtat');
@@ -137,6 +146,10 @@ export function registerGroupHandlers(bot: Bot, engine: RaceEngine) {
       await ctx.answerCallbackQuery({ text: t.groupOnly, show_alert: true });
       return;
     }
+    if (!(await engine.isChatAdmin(chat.id, ctx.from.id))) {
+      await ctx.answerCallbackQuery({ text: t.adminOnly, show_alert: true });
+      return;
+    }
 
     const res = await engine.createRace({
       chatId: chat.id,
@@ -180,32 +193,6 @@ export function registerGroupHandlers(bot: Bot, engine: RaceEngine) {
         })
         .catch(() => ctx.deleteMessage().catch(() => undefined));
     }
-  });
-
-  /* Yakundan keyin "Yana bir marta" — shu shablon bilan yangi kartochka */
-  bot.callbackQuery(/^race:again:([a-f0-9]{24}):(\d+)$/, async (ctx) => {
-    const chat = ctx.chat;
-    if (!chat || !GROUP_TYPES.includes(chat.type)) {
-      await ctx.answerCallbackQuery();
-      return;
-    }
-    const [, templateId, hostId] = ctx.match;
-    if (!(await engine.canManage(chat.id, ctx.from.id, Number(hostId)))) {
-      await ctx.answerCallbackQuery({
-        text: 'Qayta boshlashni oldingi boshlovchi yoki guruh admini qila oladi.',
-        show_alert: true,
-      });
-      return;
-    }
-    const res = await engine.createRace({
-      chatId: chat.id,
-      chatTitle: 'title' in chat ? (chat.title ?? '') : '',
-      hostId: ctx.from.id,
-      templateId: templateId!,
-    });
-    await ctx.answerCallbackQuery({ text: res.ok ? 'Yangi musobaqa tayyor \u{1F447}' : res.message, show_alert: !res.ok });
-    // Tugma qayta bosilmasligi uchun olib tashlanadi
-    if (res.ok) await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
   });
 
   /* Quiz so'rovnomasidagi javoblar */

@@ -260,7 +260,7 @@ export default function TemplateView() {
         )}
         <p className="mt-3 text-center text-[12.5px] leading-relaxed text-muted-foreground">
           {hasNativeButtons ? 'Pastdagi tugma → ' : ''}Guruhni tanlaysiz → u yerda “Boshlash” chiqadi.
-          A’zolar ro‘yxatdan o‘tmaydi.
+          Musobaqani faqat guruh admini boshlaydi.
         </p>
       </div>
 
