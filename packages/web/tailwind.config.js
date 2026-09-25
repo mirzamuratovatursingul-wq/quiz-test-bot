@@ -1,3 +1,12 @@
+/**
+ * Ranglar CSS o'zgaruvchilarida (Telegram mavzusi). `bg-primary/10` kabi shaffoflik
+ * ishlashi uchun color-mix orqali beriladi — oddiy var() bilan Tailwind uni tashlab yuboradi.
+ */
+const v = (name) => ({ opacityValue }) =>
+  opacityValue === undefined || opacityValue === '1'
+    ? `var(--${name})`
+    : `color-mix(in srgb, var(--${name}) calc(${opacityValue} * 100%), transparent)`;
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ['class', '[data-theme="dark"]'],
@@ -8,18 +17,18 @@ export default {
         sans: ['"Manrope Variable"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       colors: {
-        background: 'var(--background)',
-        foreground: 'var(--foreground)',
-        card: { DEFAULT: 'var(--card)', foreground: 'var(--card-foreground)' },
-        muted: { DEFAULT: 'var(--muted)', foreground: 'var(--muted-foreground)' },
-        primary: { DEFAULT: 'var(--primary)', foreground: 'var(--primary-foreground)' },
-        secondary: { DEFAULT: 'var(--secondary)', foreground: 'var(--secondary-foreground)' },
-        destructive: { DEFAULT: 'var(--destructive)', foreground: 'var(--destructive-foreground)' },
-        success: 'var(--success)',
-        warning: 'var(--warning)',
-        border: 'var(--border)',
-        input: 'var(--input)',
-        ring: 'var(--ring)',
+        background: v('background'),
+        foreground: v('foreground'),
+        card: { DEFAULT: v('card'), foreground: v('card-foreground') },
+        muted: { DEFAULT: v('muted'), foreground: v('muted-foreground') },
+        primary: { DEFAULT: v('primary'), foreground: v('primary-foreground') },
+        secondary: { DEFAULT: v('secondary'), foreground: v('secondary-foreground') },
+        destructive: { DEFAULT: v('destructive'), foreground: v('destructive-foreground') },
+        success: { DEFAULT: v('success'), foreground: v('success-foreground') },
+        warning: { DEFAULT: v('warning'), foreground: v('warning-foreground') },
+        border: v('border'),
+        input: v('input'),
+        ring: v('ring'),
       },
       borderRadius: {
         lg: '14px',

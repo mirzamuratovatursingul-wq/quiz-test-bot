@@ -5,6 +5,7 @@ import { logger } from '../logger.js';
 import { RaceEngine } from '../race/engine.js';
 import { registerGroupHandlers } from './handlers/group.js';
 import { registerPrivateHandlers } from './handlers/private.js';
+import { isHttps, webAppUrl } from './keyboards.js';
 
 export interface BotBundle {
   bot: Bot;
@@ -93,6 +94,8 @@ export async function startBot(): Promise<BotBundle> {
     { scope: { type: 'all_group_chats' } },
   );
 
+  await syncMenuButton(b);
+
   if (!config.BOT_USERNAME) config.BOT_USERNAME = me.username;
   logger.info(`Bot ishga tushdi: @${me.username}`);
 
@@ -105,6 +108,24 @@ export async function startBot(): Promise<BotBundle> {
   });
 
   return b;
+}
+
+/**
+ * Shaxsiy chatdagi menyu tugmasi: HTTPS bo'lsa "Panel" (Mini App) doim yozish maydoni yonida turadi.
+ * WEBAPP_URL o'zgarganda qayta chaqiriladi.
+ */
+export async function syncMenuButton(b: BotBundle | null = bundle): Promise<void> {
+  if (!b) return;
+  const url = webAppUrl('/');
+  try {
+    await b.bot.api.setChatMenuButton({
+      menu_button: isHttps(url)
+        ? { type: 'web_app', text: 'Panel', web_app: { url } }
+        : { type: 'commands' },
+    });
+  } catch (err) {
+    logger.warn('Menyu tugmasini oʻrnatib boʻlmadi', err);
+  }
 }
 
 export async function stopBot(): Promise<void> {

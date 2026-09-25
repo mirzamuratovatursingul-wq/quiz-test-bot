@@ -1,4 +1,4 @@
-import { InlineKeyboard, InputFile, type Bot } from 'grammy';
+import { InputFile, type Bot } from 'grammy';
 import type { PollAnswer } from 'grammy/types';
 import {
   assignPlaces,
@@ -13,6 +13,7 @@ import { Group, Race, Template, User } from '../db/models.js';
 import { logger } from '../logger.js';
 import { renderPodium, type PodiumEntry } from '../services/podium.service.js';
 import { escapeHtml, fetchUserAvatar } from '../services/telegram.service.js';
+import { raceFinishedKeyboard, raceIntroKeyboard } from '../bot/keyboards.js';
 
 /** Telegram so'rovnoma cheklovlari */
 const POLL_QUESTION_MAX = 300;
@@ -215,18 +216,14 @@ export class RaceEngine {
           ? `⚡ Ball: toʻgʻri javob <b>100</b> + tezlik uchun <b>100</b> gacha bonus`
           : `✅ Ball: har bir toʻgʻri javob <b>100</b>`,
         '',
-        `\u{1F4DD} Savollar soʻrovnoma koʻrinishida chiqadi — har kim <b>bir marta</b> javob beradi,`,
-        `javobni keyin oʻzgartirib boʻlmaydi.`,
-        `\u{1F465} Roʻyxatdan oʻtish shart emas: <b>istalgan savoldan</b> qoʻshilishingiz mumkin.`,
+        `<b>Qoidalar</b>`,
+        `\u{1F4DD} Savollar soʻrovnoma boʻlib chiqadi — variantni bosasiz`,
+        `\u{1F512} Har kim <b>bir marta</b> javob beradi, oʻzgartirib boʻlmaydi`,
+        `\u{1F465} Roʻyxatdan oʻtish shart emas — <b>istalgan savoldan</b> qoʻshiling`,
         '',
-        `\u{1F447} Tayyor boʻlsangiz, <b>Boshlash</b> tugmasini bosing.`,
+        `\u{1F447} Boshlovchi yoki guruh admini <b>Boshlash</b>ni bosadi.`,
       ].join('\n'),
-      {
-        parse_mode: 'HTML',
-        reply_markup: new InlineKeyboard()
-          .text('▶️ Boshlash', `race:start:${runtime.raceId}`)
-          .text('✕ Bekor', `race:cancel:${runtime.raceId}`),
-      },
+      { parse_mode: 'HTML', reply_markup: raceIntroKeyboard(runtime.raceId) },
     );
     runtime.introMessageId = msg.message_id;
 
@@ -243,12 +240,19 @@ export class RaceEngine {
   /* Start                                                             */
   /* ---------------------------------------------------------------- */
 
-  async start(chatId: number, userId: number): Promise<{ ok: boolean; message: string }> {
+  async start(
+    chatId: number,
+    userId: number,
+    raceId?: string,
+  ): Promise<{ ok: boolean; message: string }> {
     const r = this.runtimes.get(chatId);
-    if (!r) return { ok: false, message: 'Musobaqa topilmadi.' };
-    if (r.status !== 'waiting') return { ok: false, message: 'Musobaqa ketmoqda.' };
-    if (userId !== r.hostId && !(await this.isChatAdmin(chatId, userId))) {
-      return { ok: false, message: 'Faqat musobaqani yuborgan kishi yoki admin boshlaydi.' };
+    // Eski kartochkadagi tugma yangi musobaqani boshlab yubormasligi uchun id tekshiriladi
+    if (!r || (raceId && r.raceId !== raceId)) {
+      return { ok: false, message: 'Bu musobaqa endi faol emas. Yangisi: /boshlash' };
+    }
+    if (r.status !== 'waiting') return { ok: false, message: 'Musobaqa allaqachon ketmoqda.' };
+    if (!(await this.canManage(chatId, userId, r.hostId))) {
+      return { ok: false, message: 'Faqat musobaqani yuborgan kishi yoki guruh admini boshlaydi.' };
     }
 
     r.status = 'running';
@@ -285,7 +289,7 @@ export class RaceEngine {
     });
 
     void this.sendQuestion(chatId);
-    return { ok: true, message: 'Boshlandi' };
+    return { ok: true, message: 'Boshlandi — omad! \u{1F340}' };
   }
 
   /* ---------------------------------------------------------------- */
@@ -512,7 +516,11 @@ export class RaceEngine {
     const total = r.questions.length;
 
     if (ranked.length === 0) {
-      await this.bot.api.sendMessage(chatId, '\u{1F3C1} Musobaqa tugadi — hech kim javob bermadi.');
+      await this.bot.api.sendMessage(
+        chatId,
+        '\u{1F3C1} Musobaqa tugadi — hech kim javob bermadi.\n\nYana bir urinib koʻramizmi?',
+        { reply_markup: raceFinishedKeyboard(r.templateId, r.hostId) },
+      );
       this.runtimes.delete(chatId);
       return;
     }
@@ -614,10 +622,7 @@ export class RaceEngine {
           ? `\u{1F525} Eng qiyin savol: <b>${hardest.i + 1}-savol</b> — ${Math.round(hardest.rate * 100)}% toʻgʻri`
           : '',
       ],
-      [
-        `\u{1F4BE} Natijalar profilda saqlandi.`,
-        `\u{1F501} Yangi musobaqa: <code>/boshlash</code>`,
-      ],
+      [`\u{1F4BE} Natijalar shablon egasining panelida saqlandi.`],
     ];
 
     const text = sections
@@ -625,7 +630,10 @@ export class RaceEngine {
       .filter((block) => block.trim().length > 0)
       .join('\n\n');
 
-    await this.bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' });
+    await this.bot.api.sendMessage(chatId, text, {
+      parse_mode: 'HTML',
+      reply_markup: raceFinishedKeyboard(r.templateId, r.hostId),
+    });
 
     await this.updateUserStats(ranked, r);
     await Template.updateOne({ _id: r.templateId }, { $inc: { racesCount: 1 } });
@@ -657,18 +665,42 @@ export class RaceEngine {
 
   /* ---------------------------------------------------------------- */
 
-  async cancel(chatId: number, userId: number): Promise<{ ok: boolean; message: string }> {
+  async cancel(
+    chatId: number,
+    userId: number,
+    raceId?: string,
+  ): Promise<{ ok: boolean; message: string; wasRunning?: boolean; asked?: number }> {
     const r = this.runtimes.get(chatId);
-    if (!r) return { ok: false, message: 'Faol musobaqa yoʻq.' };
-    if (userId !== r.hostId && !(await this.isChatAdmin(chatId, userId))) {
-      return { ok: false, message: 'Faqat boshlovchi yoki admin toʻxtata oladi.' };
+    if (!r || (raceId && r.raceId !== raceId)) {
+      return { ok: false, message: 'Faol musobaqa yoʻq.' };
+    }
+    if (!(await this.canManage(chatId, userId, r.hostId))) {
+      return { ok: false, message: 'Faqat boshlovchi yoki guruh admini toʻxtata oladi.' };
     }
     r.stopping = true;
     if (r.timer) clearTimeout(r.timer);
     if (r.pollId) this.polls.delete(r.pollId);
+    // Ochiq turgan so'rovnomani yopamiz — javob berib bo'lmasligi aniq ko'rinsin
+    if (r.status === 'running' && r.pollMessageId) {
+      try {
+        await this.bot.api.stopPoll(chatId, r.pollMessageId);
+      } catch {
+        /* allaqachon yopilgan */
+      }
+    }
     await Race.updateOne({ _id: r.raceId }, { $set: { status: 'cancelled' } });
     this.runtimes.delete(chatId);
-    return { ok: true, message: 'Toʻxtatildi.' };
+    return {
+      ok: true,
+      message: 'Toʻxtatildi.',
+      wasRunning: r.status === 'running',
+      asked: r.index,
+    };
+  }
+
+  /** Boshlovchi yoki guruh admini boshqara oladi */
+  async canManage(chatId: number, userId: number, hostId: number): Promise<boolean> {
+    return userId === hostId || this.isChatAdmin(chatId, userId);
   }
 
   private participantDocs(r: RaceRuntime, ranked?: (ParticipantRuntime & { place: number })[]) {

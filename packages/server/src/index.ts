@@ -1,5 +1,5 @@
 import { startApi } from './api/server.js';
-import { createBot, startBot, stopBot } from './bot/index.js';
+import { createBot, startBot, stopBot, syncMenuButton } from './bot/index.js';
 import { config, warnAboutConfig, watchEnvFile } from './config.js';
 import { connectDb, disconnectDb } from './db/index.js';
 import { logger } from './logger.js';
@@ -14,6 +14,7 @@ async function main() {
     for (const [key, value] of Object.entries(changed)) {
       logger.info(`${key} yangilandi: ${value}`);
     }
+    if (changed.WEBAPP_URL) void syncMenuButton();
   });
 
   try {

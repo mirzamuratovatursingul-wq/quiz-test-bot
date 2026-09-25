@@ -55,6 +55,7 @@ interface TelegramWebApp {
   enableClosingConfirmation?: () => void;
   disableClosingConfirmation?: () => void;
   disableVerticalSwipes?: () => void;
+  onEvent?: (event: string, cb: () => void) => void;
   HapticFeedback?: {
     impactOccurred: (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') => void;
     notificationOccurred: (type: 'error' | 'success' | 'warning') => void;
@@ -77,16 +78,31 @@ declare global {
 
 export const tg = window.Telegram?.WebApp;
 export const isTelegram = Boolean(tg?.initData);
+/**
+ * Telegram ichida pastki MainButton va tepadagi BackButton bor —
+ * sahifadagi takroriy tugmalar shu holda yashiriladi.
+ */
+export const hasNativeButtons = isTelegram && Boolean(tg?.MainButton);
 
 export function initTelegram() {
   if (!tg) return;
   tg.ready();
   tg.expand();
-  document.documentElement.dataset.theme = tg.colorScheme;
   // Ro'yxatni aylantirganda Mini App tasodifan yopilib qolmasligi uchun
   tg.disableVerticalSwipes?.();
+  applyTheme();
+  // Foydalanuvchi Telegram mavzusini almashtirsa — darhol moslashamiz
+  tg.onEvent?.('themeChanged', applyTheme);
+}
+
+function applyTheme() {
+  if (!tg) return;
+  document.documentElement.dataset.theme = tg.colorScheme;
   const bg = tg.themeParams?.bg_color;
-  if (bg) tg.setHeaderColor?.(bg);
+  if (bg) {
+    tg.setHeaderColor?.(bg);
+    tg.setBackgroundColor?.(bg);
+  }
 }
 
 export function initData(): string {

@@ -30,10 +30,19 @@
 
   --success: #17a34a;
   --warning: #e5a50a;
+  /* Fon ustidagi matn uchun to'qroq tus — o'qilishi oson */
+  --success-foreground: #12813b;
+  --warning-foreground: #a36a00;
 
   --border: color-mix(in srgb, var(--tg-theme-hint-color, #94a3b8) 28%, transparent);
   --input: color-mix(in srgb, var(--tg-theme-hint-color, #94a3b8) 34%, transparent);
   --ring: var(--tg-theme-button-color, #2f80ed);
+}
+
+[data-theme='dark'] {
+  --success: #2fbf62;
+  --success-foreground: #4ade80;
+  --warning-foreground: #f5c451;
 }
 
 @layer base {
@@ -60,7 +69,6 @@
 
   #root {
     min-height: 100vh;
-    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   }
 
   input,
@@ -70,6 +78,14 @@
 }
 
 @layer utilities {
+  /* Uzun ro'yxatlarda skroll paneli ko'rinmasin (gorizontal chiplar) */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }

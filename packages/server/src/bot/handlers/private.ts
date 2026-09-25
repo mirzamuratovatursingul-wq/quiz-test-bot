@@ -1,4 +1,4 @@
-import { InlineKeyboard, InputFile, type Bot, type Context } from 'grammy';
+import { InputFile, type Bot, type Context } from 'grammy';
 import { parseTestText, optionLabel, type Question } from '@testrace/shared';
 import { config } from '../../config.js';
 import { Draft, Template, User } from '../../db/models.js';
@@ -6,10 +6,31 @@ import { logger } from '../../logger.js';
 import { ExtractError, extractText } from '../../services/extract.service.js';
 import { buildTestPdf } from '../../services/pdf.service.js';
 import { downloadTelegramFile, escapeHtml } from '../../services/telegram.service.js';
-import { draftKeyboard, mainMenuKeyboard, openAppKeyboard, templateKeyboard } from '../keyboards.js';
+import {
+  MENU,
+  draftDeleteConfirmKeyboard,
+  draftKeyboard,
+  isHttps,
+  mainMenuKeyboard,
+  openAppKeyboard,
+  templateKeyboard,
+  templatesListKeyboard,
+  webAppUrl,
+} from '../keyboards.js';
 import { t } from '../texts.js';
 
 const MIN_TEXT_LENGTH = 40;
+/** Ro'yxatda bir sahifadagi shablonlar soni */
+const TEMPLATES_PER_PAGE = 8;
+
+type PdfMode = 'plain' | 'key' | 'teacher';
+
+const PDF_CAPTIONS: Record<PdfMode, string> = {
+  plain: '\u{1F4C4} Test varianti (kalitsiz) — oʻquvchilarga tarqatish uchun',
+  key: '\u{1F511} Test + oxirgi sahifada javoblar kaliti',
+  teacher: '\u{1F469}‍\u{1F3EB} Oʻqituvchi nusxasi — toʻgʻri javoblar belgilangan',
+};
+const PDF_SUFFIX: Record<PdfMode, string> = { plain: '', key: '-kalit', teacher: '-oqituvchi' };
 
 function guessTitle(fileName?: string, text?: string): string {
   if (fileName) {
@@ -59,9 +80,42 @@ function draftSummary(params: {
 
   lines.push(
     '',
-    '\u{1F447} Savollarni koʻrib chiqing va tasdiqlang — shundan keyin shablon profilingizga saqlanadi.',
+    params.needsReview > 0
+      ? '\u{1F447} Javobsiz savollarni panelda bir bosishda belgilang — keyin tasdiqlang.'
+      : '\u{1F447} Koʻrib chiqib tasdiqlang yoki darhol saqlang — shablon profilingizga tushadi.',
   );
   return lines.join('\n');
+}
+
+/** Shablon kartochkasi matni (ro'yxatdan ochilganda va saqlangach) */
+function templateCard(template: {
+  title: string;
+  questions: unknown;
+  racesCount?: number;
+  settings?: { timePerQuestion?: number } | null;
+}): string {
+  const questions = template.questions as Question[];
+  const preview = questions
+    .slice(0, 3)
+    .map(
+      (q, i) =>
+        `<b>${i + 1}.</b> ${escapeHtml(q.text.length > 90 ? `${q.text.slice(0, 89)}…` : q.text)}\n` +
+        `     ✅ ${escapeHtml(q.options[q.correctIndex]?.text ?? '—')}`,
+    )
+    .join('\n');
+  const races = template.racesCount ?? 0;
+  return [
+    `\u{1F4DA} <b>${escapeHtml(template.title)}</b>`,
+    ``,
+    `❓ ${questions.length} ta savol · ⏱ savolga ${template.settings?.timePerQuestion ?? 15} s`,
+    races > 0 ? `\u{1F3C1} ${races} marta musobaqa oʻtkazilgan` : `\u{1F195} Hali musobaqa oʻtkazilmagan`,
+    ``,
+    preview,
+    questions.length > 3 ? `<i>…va yana ${questions.length - 3} ta savol</i>` : '',
+  ]
+    .filter((l, i, arr) => l !== '' || arr[i - 1] !== '')
+    .join('\n')
+    .trim();
 }
 
 async function handleParsedText(
@@ -76,12 +130,12 @@ async function handleParsedText(
   if (result.questions.length === 0) {
     await ctx.reply(
       [
-        '❌ Savollar topilmadi.',
+        '❌ <b>Savollar topilmadi</b>',
         '',
         'Test quyidagi koʻrinishda boʻlishi kerak:',
-        '<code>1. Savol matni?</code>',
-        '<code>+A) Toʻgʻri javob</code>',
-        '<code>B) Boshqa variant</code>',
+        '<code>1. Savol matni?',
+        '+A) Toʻgʻri javob',
+        'B) Boshqa variant</code>',
         '',
         'Yoki oxirida javoblar kaliti boʻlsin: <code>1-A, 2-B, 3-C</code>',
       ].join('\n'),
@@ -106,7 +160,7 @@ async function handleParsedText(
     .slice(0, 2)
     .map((q, i) => {
       const opts = q.options
-        .map((o, oi) => `  ${oi === q.correctIndex ? '✅' : '➖'} ${optionLabel(oi)}) ${escapeHtml(o.text)}`)
+        .map((o, oi) => `  ${oi === q.correctIndex ? '✅' : '▫️'} ${optionLabel(oi)}) ${escapeHtml(o.text)}`)
         .join('\n');
       return `<b>${i + 1}. ${escapeHtml(q.text)}</b>\n${opts}`;
     })
@@ -121,23 +175,35 @@ async function handleParsedText(
       strategy: result.strategy,
       warnings: result.warnings,
     })}\n\n<b>Namuna:</b>\n${preview}`,
-    { parse_mode: 'HTML', reply_markup: draftKeyboard(String(draft._id)) },
+    {
+      parse_mode: 'HTML',
+      reply_markup: draftKeyboard(String(draft._id), result.stats.withCorrect, result.stats.total),
+    },
   );
 }
 
 export function registerPrivateHandlers(bot: Bot) {
   bot.chatType('private').command('start', async (ctx) => {
-    await ctx.reply(t.start(escapeHtml(ctx.from?.first_name ?? 'doʻst')), {
+    const hasPanel = isHttps(webAppUrl('/'));
+    await ctx.reply(t.start(escapeHtml(ctx.from?.first_name ?? 'doʻst'), hasPanel), {
       parse_mode: 'HTML',
       reply_markup: mainMenuKeyboard(),
     });
-    await ctx.reply('\u{1F447} Yaratuvchi paneli (shablonlar, tahrirlash, PDF, statistika):', {
-      reply_markup: openAppKeyboard('/'),
-    });
+    // Guruhdagi "Botni ochish" tugmasidan kelgan bo'lsa — darhol yuklash yo'riqnomasi
+    if (ctx.match === 'upload') {
+      await ctx.reply(t.uploadHint, { parse_mode: 'HTML' });
+      return;
+    }
+    // HTTPS bo'lsa panel chat pastidagi menyu tugmasida turadi; aks holda (dev) oddiy havola
+    if (!hasPanel) {
+      await ctx.reply('\u{1F447} Panel (shablonlar, tahrirlash, PDF):', {
+        reply_markup: openAppKeyboard('/'),
+      });
+    }
   });
 
   bot.chatType('private').command(['help', 'yordam'], async (ctx) => {
-    await ctx.reply(t.help, { parse_mode: 'HTML' });
+    await ctx.reply(t.help, { parse_mode: 'HTML', reply_markup: openAppKeyboard('/new', '\u{1F4E4} Panelda test qoʻshish') });
   });
 
   /* ---------------- Fayl yuklash ---------------- */
@@ -146,10 +212,11 @@ export function registerPrivateHandlers(bot: Bot) {
     const doc = ctx.message.document;
     const sizeMb = (doc.file_size ?? 0) / (1024 * 1024);
     if (sizeMb > config.MAX_FILE_MB) {
-      await ctx.reply(t.fileTooBig(config.MAX_FILE_MB));
+      await ctx.reply(t.fileTooBig(config.MAX_FILE_MB), { parse_mode: 'HTML' });
       return;
     }
 
+    await ctx.replyWithChatAction('typing').catch(() => undefined);
     const status = await ctx.reply(t.analyzing);
     try {
       const buffer = await downloadTelegramFile(ctx.api, doc.file_id);
@@ -166,7 +233,9 @@ export function registerPrivateHandlers(bot: Bot) {
         await ctx.reply(`⚠️ ${err.message}`);
       } else {
         logger.error('Hujjatni qayta ishlashda xato', err);
-        await ctx.reply('❌ Faylni qayta ishlab boʻlmadi. Qaytadan urinib koʻring.');
+        await ctx.reply(
+          '❌ Faylni qayta ishlab boʻlmadi. Qaytadan yuboring yoki test matnini nusxalab joylang.',
+        );
       }
     }
   });
@@ -178,27 +247,16 @@ export function registerPrivateHandlers(bot: Bot) {
     if (text.startsWith('/')) return;
 
     switch (text) {
-      case '\u{1F4DA} Shablonlarim':
-        await sendTemplates(ctx);
+      case MENU.templates:
+        await sendTemplates(ctx, 0);
         return;
-      case '\u{1F4E4} Test yuklash':
-        await ctx.reply(
-          [
-            '\u{1F4E4} Menga PDF, Word (.docx) fayl yoki test matnini yuboring.',
-            '',
-            'Toʻgʻri javobni <b>+</b> bilan belgilang:',
-            '<code>1. 2+2=?</code>',
-            '<code>A) 3</code>',
-            '<code>+B) 4</code>',
-            '<code>C) 5</code>',
-          ].join('\n'),
-          { parse_mode: 'HTML' },
-        );
+      case MENU.upload:
+        await ctx.reply(t.uploadHint, { parse_mode: 'HTML' });
         return;
-      case '\u{1F4CA} Statistikam':
+      case MENU.stats:
         await sendStats(ctx);
         return;
-      case 'ℹ️ Yordam':
+      case MENU.help:
         await ctx.reply(t.help, { parse_mode: 'HTML' });
         return;
       default:
@@ -207,16 +265,17 @@ export function registerPrivateHandlers(bot: Bot) {
 
     if (text.length < MIN_TEXT_LENGTH) {
       await ctx.reply(
-        'Test matni juda qisqa. Toʻliq testni yuboring yoki PDF/Word fayl yuklang. ℹ️ /yordam',
+        '✍️ Bu test matniga oʻxshamayapti — juda qisqa. Toʻliq testni yuboring yoki PDF/Word fayl yuklang.\n\nℹ️ Format: /yordam',
       );
       return;
     }
 
+    await ctx.replyWithChatAction('typing').catch(() => undefined);
     await handleParsedText(ctx, { text, sourceType: 'text' });
   });
 
   bot.chatType('private').command(['shablonlarim', 'templates'], async (ctx) => {
-    await sendTemplates(ctx);
+    await sendTemplates(ctx, 0);
   });
 
   bot.chatType('private').command(['statistika', 'stats'], async (ctx) => {
@@ -225,11 +284,14 @@ export function registerPrivateHandlers(bot: Bot) {
 
   /* ---------------- Callbacklar ---------------- */
 
+  /* Sahifa raqami kabi bosilmaydigan tugmalar */
+  bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery());
+
   bot.callbackQuery(/^draft:save:(.+)$/, async (ctx) => {
     const draftId = ctx.match[1]!;
-    const draft = await Draft.findById(draftId);
+    const draft = await Draft.findById(draftId).catch(() => null);
     if (!draft || draft.ownerId !== ctx.from.id) {
-      await ctx.answerCallbackQuery({ text: 'Qoralama topilmadi.', show_alert: true });
+      await ctx.answerCallbackQuery({ text: 'Qoralama topilmadi — ehtimol allaqachon saqlangan.', show_alert: true });
       return;
     }
 
@@ -237,7 +299,7 @@ export function registerPrivateHandlers(bot: Bot) {
     const ready = questions.filter((q) => q.correctIndex >= 0 && q.options.length >= 2);
     if (ready.length === 0) {
       await ctx.answerCallbackQuery({
-        text: 'Hech bir savolning toʻgʻri javobi aniqlanmagan. Mini App orqali belgilang.',
+        text: 'Hech bir savolning toʻgʻri javobi aniqlanmagan. «Koʻrib chiqish» orqali belgilang.',
         show_alert: true,
       });
       return;
@@ -258,77 +320,97 @@ export function registerPrivateHandlers(bot: Bot) {
     await ctx.editMessageText(
       [
         `\u{1F4BE} <b>Shablon saqlandi!</b>`,
-        ``,
-        `\u{1F4DA} <b>${escapeHtml(template.title)}</b>`,
-        `❓ Savollar: <b>${ready.length}</b> ta`,
-        skipped > 0 ? `⚠️ Javobi aniqlanmagan ${skipped} ta savol tashlab ketildi.` : '',
-        ``,
-        `Endi uni guruhda <code>/boshlash</code> orqali ishlatishingiz mumkin.`,
-      ]
-        .filter(Boolean)
-        .join('\n'),
+        ...(skipped > 0 ? [`⚠️ Javobi aniqlanmagan ${skipped} ta savol tashlab ketildi.`] : []),
+        '',
+        templateCard(template),
+        '',
+        '\u{1F447} Endi uni guruhga yuborib, musobaqa oʻtkazishingiz mumkin.',
+      ].join('\n'),
       { parse_mode: 'HTML', reply_markup: templateKeyboard(String(template._id)) },
     );
     await ctx.answerCallbackQuery({ text: 'Saqlandi ✅' });
   });
 
+  /* O'chirish — avval tasdiq so'raladi */
   bot.callbackQuery(/^draft:del:(.+)$/, async (ctx) => {
-    const draftId = ctx.match[1]!;
-    await Draft.deleteOne({ _id: draftId, ownerId: ctx.from.id });
-    await ctx.editMessageText('\u{1F5D1} Qoralama oʻchirildi.');
+    await ctx.editMessageReplyMarkup({ reply_markup: draftDeleteConfirmKeyboard(ctx.match[1]!) });
+    await ctx.answerCallbackQuery({ text: 'Rostdan oʻchirilsinmi?' });
+  });
+
+  bot.callbackQuery(/^draft:keep:(.+)$/, async (ctx) => {
+    const draft = await Draft.findOne({ _id: ctx.match[1]!, ownerId: ctx.from.id }).catch(() => null);
+    if (!draft) {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+      await ctx.answerCallbackQuery({ text: 'Qoralama topilmadi.' });
+      return;
+    }
+    const questions = draft.questions as unknown as Question[];
+    const ready = questions.filter((q) => q.correctIndex >= 0 && q.options.length >= 2).length;
+    await ctx.editMessageReplyMarkup({
+      reply_markup: draftKeyboard(String(draft._id), ready, questions.length),
+    });
     await ctx.answerCallbackQuery();
   });
 
-  bot.callbackQuery(/^tpl:open:(.+)$/, async (ctx) => {
-    const template = await Template.findOne({ _id: ctx.match[1]!, ownerId: ctx.from.id });
-    if (!template) {
-      await ctx.answerCallbackQuery({ text: 'Shablon topilmadi.', show_alert: true });
-      return;
-    }
-    const questions = template.questions as unknown as Question[];
-    const preview = questions
-      .slice(0, 3)
-      .map((q, i) => `${i + 1}. ${escapeHtml(q.text)}\n   ✅ ${escapeHtml(q.options[q.correctIndex]?.text ?? '—')}`)
-      .join('\n');
-    await ctx.reply(
-      [
-        `\u{1F4DA} <b>${escapeHtml(template.title)}</b>`,
-        `❓ ${questions.length} ta savol • \u{1F3C1} ${template.racesCount} marta musobaqa`,
-        `⏱ Savolga ${template.settings?.timePerQuestion ?? 15} soniya`,
-        ``,
-        preview,
-      ].join('\n'),
-      { parse_mode: 'HTML', reply_markup: templateKeyboard(String(template._id)) },
+  bot.callbackQuery(/^draft:delok:(.+)$/, async (ctx) => {
+    await Draft.deleteOne({ _id: ctx.match[1]!, ownerId: ctx.from.id }).catch(() => undefined);
+    await ctx.editMessageText('\u{1F5D1} Qoralama oʻchirildi.\n\nYangi test uchun fayl yoki matn yuboring.');
+    await ctx.answerCallbackQuery({ text: 'Oʻchirildi' });
+  });
+
+  /* Ro'yxat sahifasi (xabar joyida tahrirlanadi) */
+  bot.callbackQuery(/^tpl:list:(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await sendTemplates(ctx, Number(ctx.match[1]), true);
+  });
+
+  /* Shablon kartochkasi. Eski tugmalarda sahifa raqami bo'lmasligi mumkin. */
+  bot.callbackQuery(/^tpl:open:([^:]+)(?::(\d+))?$/, async (ctx) => {
+    const template = await Template.findOne({ _id: ctx.match[1]!, ownerId: ctx.from.id }).catch(
+      () => null,
     );
+    if (!template) {
+      await ctx.answerCallbackQuery({ text: 'Shablon topilmadi — ehtimol oʻchirilgan.', show_alert: true });
+      return;
+    }
+    const page = ctx.match[2] !== undefined ? Number(ctx.match[2]) : undefined;
+    await ctx
+      .editMessageText(templateCard(template), {
+        parse_mode: 'HTML',
+        reply_markup: templateKeyboard(String(template._id), page),
+      })
+      .catch(async () => {
+        // Xabarni tahrirlab bo'lmasa (masalan, juda eski) — yangi xabar
+        await ctx.reply(templateCard(template), {
+          parse_mode: 'HTML',
+          reply_markup: templateKeyboard(String(template._id), page),
+        });
+      });
     await ctx.answerCallbackQuery();
   });
 
-  bot.callbackQuery(/^tpl:pdf:([^:]+):(plain|key)$/, async (ctx) => {
-    const [, id, mode] = ctx.match;
-    const template = await Template.findOne({ _id: id!, ownerId: ctx.from.id });
+  bot.callbackQuery(/^tpl:pdf:([^:]+):(plain|key|teacher)$/, async (ctx) => {
+    const [, id, rawMode] = ctx.match;
+    const mode = rawMode as PdfMode;
+    const template = await Template.findOne({ _id: id!, ownerId: ctx.from.id }).catch(() => null);
     if (!template) {
       await ctx.answerCallbackQuery({ text: 'Shablon topilmadi.', show_alert: true });
       return;
     }
-    await ctx.answerCallbackQuery({ text: 'PDF tayyorlanmoqda...' });
+    await ctx.answerCallbackQuery({ text: '⏳ PDF tayyorlanmoqda…' });
+    await ctx.replyWithChatAction('upload_document').catch(() => undefined);
     try {
       const pdf = await buildTestPdf(template, {
         withAnswerKey: mode === 'key',
-        markCorrectInline: false,
+        markCorrectInline: mode === 'teacher',
       });
       const safeName = template.title.replace(/[^\p{L}\p{N}_ -]/gu, '').trim() || 'test';
-      await ctx.replyWithDocument(
-        new InputFile(pdf, `${safeName}${mode === 'key' ? '-kalit' : ''}.pdf`),
-        {
-          caption:
-            mode === 'key'
-              ? '\u{1F511} Test + javoblar kaliti'
-              : '\u{1F4C4} Test varianti (kalitsiz)',
-        },
-      );
+      await ctx.replyWithDocument(new InputFile(pdf, `${safeName}${PDF_SUFFIX[mode]}.pdf`), {
+        caption: `${PDF_CAPTIONS[mode]}\n\u{1F4DA} ${template.title}`,
+      });
     } catch (err) {
       logger.error('PDF yaratishda xato', err);
-      await ctx.reply('❌ PDF yaratib boʻlmadi.');
+      await ctx.reply('❌ PDF yaratib boʻlmadi. Birozdan soʻng qayta urinib koʻring.');
     }
   });
 
@@ -336,8 +418,11 @@ export function registerPrivateHandlers(bot: Bot) {
     await ctx.answerCallbackQuery();
     await ctx.reply(
       [
-        'Botni guruhga qoʻshing va u yerda <code>/boshlash</code> deb yozing.',
-        'Soʻng shablonni tanlab, <b>Boshlash</b> tugmasini bosasiz.',
+        '\u{1F3C1} <b>Guruhda musobaqa</b>',
+        '',
+        '1) Botni guruhga qoʻshing',
+        '2) Guruhda <code>/boshlash</code> deb yozing',
+        '3) Shablonni tanlab, <b>Boshlash</b> tugmasini bosing',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -346,34 +431,48 @@ export function registerPrivateHandlers(bot: Bot) {
 
 /* -------------------------------------------------------------- */
 
-async function sendTemplates(ctx: Context) {
-  const c = ctx;
-  const userId = c.from?.id;
+/** Shablonlar ro'yxati. `edit` — callbackdan chaqirilganda xabarni joyida yangilash. */
+async function sendTemplates(ctx: Context, page: number, edit = false) {
+  const userId = ctx.from?.id;
   if (!userId) return;
 
-  const templates = await Template.find({ ownerId: userId }).sort({ createdAt: -1 }).limit(20);
-  if (templates.length === 0) {
-    await c.reply(t.noTemplates, { reply_markup: openAppKeyboard('/') });
+  const total = await Template.countDocuments({ ownerId: userId });
+  if (total === 0) {
+    const extra = { parse_mode: 'HTML' as const, reply_markup: openAppKeyboard('/new', '\u{1F4E4} Panelda test qoʻshish') };
+    if (edit) await ctx.editMessageText(t.noTemplates, extra).catch(() => undefined);
+    else await ctx.reply(t.noTemplates, extra);
     return;
   }
 
-  const kb = new InlineKeyboard();
-  templates.forEach((tpl, i) => {
-    kb.text(
-      `${i + 1}. ${tpl.title.slice(0, 28)} (${tpl.questions.length})`,
-      `tpl:open:${String(tpl._id)}`,
-    ).row();
-  });
+  const pages = Math.ceil(total / TEMPLATES_PER_PAGE);
+  const current = Math.min(Math.max(page, 0), pages - 1);
+  const offset = current * TEMPLATES_PER_PAGE;
+  const templates = await Template.find({ ownerId: userId })
+    .sort({ createdAt: -1 })
+    .skip(offset)
+    .limit(TEMPLATES_PER_PAGE);
 
-  await c.reply(
-    `\u{1F4DA} <b>Shablonlaringiz</b> (${templates.length} ta)\n\nBatafsil koʻrish uchun tanlang:`,
-    { parse_mode: 'HTML', reply_markup: kb },
+  const text = [
+    `\u{1F4DA} <b>Shablonlaringiz</b> · ${total} ta`,
+    ``,
+    `Kerakli testni tanlang — PDF olasiz yoki guruhga yuborasiz.`,
+  ].join('\n');
+  const kb = templatesListKeyboard(
+    templates.map((tpl) => ({ id: String(tpl._id), title: tpl.title, questions: tpl.questions.length })),
+    current,
+    pages,
+    offset,
   );
+
+  if (edit) {
+    await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb }).catch(() => undefined);
+  } else {
+    await ctx.reply(text, { parse_mode: 'HTML', reply_markup: kb });
+  }
 }
 
 async function sendStats(ctx: Context) {
-  const c = ctx;
-  const userId = c.from?.id;
+  const userId = ctx.from?.id;
   if (!userId) return;
 
   const [user, templatesCount] = await Promise.all([
@@ -384,17 +483,26 @@ async function sendStats(ctx: Context) {
   const accuracy =
     s && s.totalAnswers > 0 ? Math.round((s.totalCorrect / s.totalAnswers) * 100) : 0;
 
-  await c.reply(
+  await ctx.reply(
     [
       '\u{1F4CA} <b>Statistikangiz</b>',
       '',
+      '<b>Yaratuvchi sifatida</b>',
       `\u{1F4DA} Shablonlar: <b>${templatesCount}</b>`,
       `\u{1F3C1} Oʻtkazgan musobaqalar: <b>${s?.racesHosted ?? 0}</b>`,
-      `\u{1F3AE} Qatnashgan musobaqalar: <b>${s?.racesPlayed ?? 0}</b>`,
-      `\u{1F947} Gʻalabalar: <b>${s?.wins ?? 0}</b>`,
+      '',
+      '<b>Ishtirokchi sifatida</b>',
+      `\u{1F3AE} Qatnashgan: <b>${s?.racesPlayed ?? 0}</b> · \u{1F947} Gʻalaba: <b>${s?.wins ?? 0}</b>`,
       `✅ Toʻgʻri javoblar: <b>${s?.totalCorrect ?? 0}</b> / ${s?.totalAnswers ?? 0} (${accuracy}%)`,
       `⭐ Umumiy ball: <b>${s?.totalScore ?? 0}</b>`,
     ].join('\n'),
-    { parse_mode: 'HTML', reply_markup: openAppKeyboard('/profile') },
+    {
+      parse_mode: 'HTML',
+      reply_markup: openAppKeyboard('/profile', '\u{1F4C8} Batafsil — panelda').row().text(
+        MENU.templates,
+        'tpl:list:0',
+      ),
+    },
   );
 }
+

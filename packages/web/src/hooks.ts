@@ -5,8 +5,9 @@ import { backButton, mainButton, setClosingConfirmation } from '@/telegram';
 /**
  * Telegram'ning tepasidagi "orqaga" tugmasi.
  * Telegram ichida bo'lmasa hech narsa qilmaydi (sahifadagi tugma ishlaydi).
+ * `enabled=false` — tugma yashiriladi (masalan, pastki menyu bo'limlarida).
  */
-export function useTelegramBackButton(handler?: () => void) {
+export function useTelegramBackButton(handler?: () => void, enabled = true) {
   const navigate = useNavigate();
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
@@ -14,6 +15,10 @@ export function useTelegramBackButton(handler?: () => void) {
   useEffect(() => {
     const btn = backButton;
     if (!btn) return;
+    if (!enabled) {
+      btn.hide();
+      return;
+    }
     const onClick = () => {
       if (handlerRef.current) handlerRef.current();
       else navigate(-1);
@@ -24,7 +29,7 @@ export function useTelegramBackButton(handler?: () => void) {
       btn.offClick(onClick);
       btn.hide();
     };
-  }, [navigate]);
+  }, [navigate, enabled]);
 }
 
 export interface MainButtonOptions {

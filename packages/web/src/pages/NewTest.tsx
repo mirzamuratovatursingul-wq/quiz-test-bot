@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { FileUp, Sparkles, Type } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ClipboardPaste, FileUp, Loader2, Type, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, ApiError } from '@/api';
 import { Page, PageHeader } from '@/components/app';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useTelegramBackButton, useTelegramMainButton } from '@/hooks';
-import { haptic, tap } from '@/telegram';
+import { hasNativeButtons, haptic, tap } from '@/telegram';
 
 const SAMPLE = `1. O‘zbekiston poytaxti qaysi shahar?
 +A) Toshkent
@@ -19,17 +19,24 @@ A) 54
 +B) 56
 C) 64`;
 
+/** Tahlilga yuborish uchun eng kam matn uzunligi */
+const MIN_LENGTH = 20;
+
 export default function NewTest() {
-  const [mode, setMode] = useState<'choose' | 'text'>('choose');
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
+  // "Namuna bilan sinash" (bosh sahifadan): matn rejimi namuna bilan to'ldirilib ochiladi
+  const [params] = useSearchParams();
+  const withSample = params.get('sample') === '1';
+  const [mode, setMode] = useState<'choose' | 'text'>(withSample ? 'text' : 'choose');
+  const [text, setText] = useState(withSample ? SAMPLE : '');
+  const [busy, setBusy] = useState<null | { label: string }>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  useTelegramBackButton(() => (mode === 'text' ? setMode('choose') : navigate(-1)));
+  // "Yangi test" — pastki menyudagi bo'lim; orqaga tugmasi faqat matn rejimida kerak
+  useTelegramBackButton(() => setMode('choose'), mode === 'text');
 
-  async function run(fn: () => Promise<{ draft: { id: string } }>) {
-    setBusy(true);
+  async function run(label: string, fn: () => Promise<{ draft: { id: string } }>) {
+    setBusy({ label });
     try {
       const res = await fn();
       haptic('success');
@@ -38,24 +45,30 @@ export default function NewTest() {
       haptic('error');
       toast.error(err instanceof ApiError ? err.message : 'Tahlil qilib bo‘lmadi');
     } finally {
-      setBusy(false);
+      setBusy(null);
+      if (fileRef.current) fileRef.current.value = '';
     }
   }
+
+  const trimmed = text.trim();
+  const questionCount = (trimmed.match(/^\s*\d+\s*[.)\]]/gm) ?? []).length;
+  const canParse = trimmed.length >= MIN_LENGTH;
+  const parseText = () => void run('Savollar ajratilmoqda…', () => api.parseText(text));
 
   useTelegramMainButton({
     text: busy ? 'Tahlil qilinmoqda…' : '🔍 Tahlil qilish',
     visible: mode === 'text',
-    enabled: text.trim().length >= 20,
-    loading: busy,
-    onClick: () => void run(() => api.parseText(text)),
+    enabled: canParse,
+    loading: Boolean(busy),
+    onClick: parseText,
   });
 
   return (
     <Page>
       <PageHeader
         title="Yangi test"
-        meta={mode === 'text' ? 'Test matnini joylashtiring' : 'Qaysi ko‘rinishda beryapsiz?'}
-        back
+        meta={mode === 'text' ? 'Test matnini joylashtiring' : 'Testni qaysi ko‘rinishda berasiz?'}
+        back={mode === 'text'}
       />
 
       <input
@@ -65,18 +78,20 @@ export default function NewTest() {
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) void run(() => api.uploadFile(file));
+          if (file) void run(`“${file.name}” o‘qilmoqda…`, () => api.uploadFile(file));
         }}
       />
 
+      {busy && <BusyOverlay label={busy.label} />}
+
       {mode === 'choose' ? (
         <>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2.5">
             <Choice
               icon={<FileUp className="size-6" />}
               label="Fayl yuklash"
-              hint="PDF yoki Word (.docx)"
-              disabled={busy}
+              hint="PDF yoki Word (.docx) — 20 MB gacha"
+              disabled={Boolean(busy)}
               onClick={() => {
                 tap();
                 fileRef.current?.click();
@@ -84,9 +99,9 @@ export default function NewTest() {
             />
             <Choice
               icon={<Type className="size-6" />}
-              label="Matn joylash"
-              hint="Nusxa ko‘chirib qo‘yasiz"
-              disabled={busy}
+              label="Matnni joylash"
+              hint="Testni nusxa ko‘chirib shu yerga qo‘yasiz"
+              disabled={Boolean(busy)}
               onClick={() => {
                 tap();
                 setMode('text');
@@ -94,20 +109,15 @@ export default function NewTest() {
             />
           </div>
 
-          {busy && (
-            <p className="pt-5 text-center text-[13.5px] text-muted-foreground">
-              ⏳ Fayl o‘qilmoqda va savollar ajratilmoqda…
-            </p>
-          )}
-
-          <div className="mt-5 rounded-lg border border-border bg-card p-4">
-            <p className="mb-1 flex items-center gap-2 font-semibold">
-              <Sparkles className="size-4 text-primary" /> Nima bo‘ladi keyin?
-            </p>
-            <p className="text-[13.5px] leading-relaxed text-muted-foreground">
-              Savol, variant va to‘g‘ri javoblarni o‘zim ajratib olaman. Keyin ularni ko‘rib
-              chiqasiz — javobi topilmaganlari sariq bo‘lib turadi, bir bosishda belgilaysiz.
-            </p>
+          <div className="mt-5 flex gap-3 rounded-xl bg-primary/5 p-4">
+            <Wand2 className="mt-0.5 size-5 shrink-0 text-primary" />
+            <div>
+              <p className="font-semibold">Keyin nima bo‘ladi?</p>
+              <p className="mt-0.5 text-[13.5px] leading-relaxed text-muted-foreground">
+                Savol, variant va to‘g‘ri javoblarni o‘zim ajrataman. Siz ko‘rib chiqasiz — javobi
+                topilmaganlari sariq bo‘lib turadi, bir bosishda belgilaysiz.
+              </p>
+            </div>
           </div>
 
           <FormatHelp />
@@ -118,28 +128,37 @@ export default function NewTest() {
             autoFocus
             value={text}
             placeholder={SAMPLE}
-            className="min-h-[44vh] leading-relaxed"
+            className="min-h-[44vh] rounded-xl bg-card font-mono text-[14px] leading-relaxed"
             onChange={(e) => setText(e.target.value)}
           />
-          <p className="text-[12.5px] text-muted-foreground">
-            {text.trim().length < 20
-              ? '✍️ Test matnini qo‘ying — kamida bitta savol va variantlar.'
-              : `✓ ${text.trim().split('\n').filter(Boolean).length} qator kiritildi`}
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[12.5px] text-muted-foreground">
+              {!canParse
+                ? '✍️ Kamida bitta savol va variantlarini qo‘ying'
+                : questionCount > 0
+                  ? `✓ Taxminan ${questionCount} ta savol`
+                  : `✓ ${trimmed.split('\n').filter(Boolean).length} qator`}
+            </p>
+            {!trimmed && (
+              <Button
+                variant="tonal"
+                size="sm"
+                onClick={() => {
+                  tap();
+                  setText(SAMPLE);
+                }}
+              >
+                <ClipboardPaste /> Namunani qo‘yish
+              </Button>
+            )}
+          </div>
 
-          <div className="flex gap-2">
-            <Button variant="secondary" className="flex-1" onClick={() => setMode('choose')}>
-              Orqaga
-            </Button>
-            <Button
-              className="flex-1"
-              loading={busy}
-              disabled={text.trim().length < 20}
-              onClick={() => void run(() => api.parseText(text))}
-            >
+          {/* Telegram ichida bu vazifani pastdagi MainButton bajaradi */}
+          {!hasNativeButtons && (
+            <Button className="w-full" size="lg" loading={Boolean(busy)} disabled={!canParse} onClick={parseText}>
               🔍 Tahlil qilish
             </Button>
-          </div>
+          )}
 
           <FormatHelp />
         </div>
@@ -148,15 +167,32 @@ export default function NewTest() {
   );
 }
 
+/** Tahlil vaqtida butun ekranni yopib turuvchi holat — ikki marta bosilmasin */
+function BusyOverlay({ label }: { label: string }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm animate-fade-in">
+      <div className="w-full max-w-xs rounded-2xl border border-border bg-card p-6 text-center shadow-lg">
+        <Loader2 className="mx-auto size-8 animate-spin text-primary" />
+        <p className="mt-3 truncate font-semibold">{label}</p>
+        <p className="mt-1 text-[13px] text-muted-foreground">Katta fayllarda bir necha soniya oladi</p>
+      </div>
+    </div>
+  );
+}
+
 function FormatHelp() {
   return (
-    <div className="mt-3 rounded-lg border border-border bg-card p-4">
-      <p className="mb-2 font-semibold">📋 Format qanday bo‘lsin?</p>
-      <div className="space-y-2 text-[13.5px] leading-relaxed text-muted-foreground">
+    <details className="group mt-4 rounded-xl border border-border bg-card p-4 [&_summary::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center justify-between font-semibold">
+        📋 Format qanday bo‘lsin?
+        <span className="text-[13px] font-medium text-primary group-open:hidden">Ko‘rish</span>
+        <span className="hidden text-[13px] font-medium text-primary group-open:inline">Yopish</span>
+      </summary>
+      <div className="mt-3 space-y-2 text-[13.5px] leading-relaxed text-muted-foreground">
         <p>
           To‘g‘ri javob oldiga <b className="text-foreground">+</b> qo‘ying:
         </p>
-        <pre className="overflow-x-auto rounded-md bg-muted p-3 text-[13px] leading-relaxed text-foreground">
+        <pre className="overflow-x-auto rounded-[12px] bg-muted p-3 text-[13px] leading-relaxed text-foreground">
 {`1. Savol matni?
 +A) To‘g‘ri javob
 B) Boshqa variant`}
@@ -167,7 +203,7 @@ B) Boshqa variant`}
         <p>➕ Word faylda to‘g‘ri javob qalin (bold) bo‘lsa ham tanib olaman.</p>
         <p>⚠️ Skaner qilingan (rasm) PDF ishlamaydi — ichida matn bo‘lishi kerak.</p>
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -188,13 +224,15 @@ function Choice({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="flex flex-col items-center justify-center gap-2 rounded-lg border border-border bg-card px-3 py-6 text-center active:scale-[.98] disabled:opacity-50"
+      className="flex w-full items-center gap-4 rounded-xl border border-border bg-card p-4 text-left transition-transform active:scale-[.99] disabled:opacity-50"
     >
-      <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-primary">
+      <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
         {icon}
       </span>
-      <span className="font-semibold">{label}</span>
-      <span className="text-[12.5px] leading-tight text-muted-foreground">{hint}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[16px] font-bold">{label}</span>
+        <span className="block text-[13px] leading-snug text-muted-foreground">{hint}</span>
+      </span>
     </button>
   );
 }
