@@ -33,14 +33,12 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // Kutubxonalar alohida faylda: ilova kodi o'zgarganda (har deploy) foydalanuvchi
-        // ularni qayta yuklamaydi — brauzer keshidan oladi
+        // ularni qayta yuklamaydi — brauzer keshidan oladi.
+        // DIQQAT: hammasi BITTA chunk'da bo'lishi shart. React / UI / boshqalarga bo'linganda
+        // chunk'lar bir-biriga aylanma bog'lanib qoldi va radix React yuklanmasdan uni
+        // chaqirdi ("reading 'useLayoutEffect'") — Mini App bo'sh sahifa ko'rsatdi.
         manualChunks(id) {
-          if (!id.includes('node_modules')) return undefined;
-          if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) {
-            return 'react';
-          }
-          if (id.includes('@radix-ui') || id.includes('lucide-react') || id.includes('sonner')) return 'ui';
-          return 'vendor';
+          return id.includes('node_modules') ? 'vendor' : undefined;
         },
       },
     },

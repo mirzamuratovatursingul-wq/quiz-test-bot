@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import { adminRoutes } from './routes/admin.js';
 import { draftRoutes } from './routes/drafts.js';
 import { profileRoutes, raceRoutes } from './routes/races.js';
 import { templateRoutes } from './routes/templates.js';
@@ -47,6 +48,7 @@ export async function buildApi(): Promise<FastifyInstance> {
   await app.register(draftRoutes);
   await app.register(raceRoutes);
   await app.register(profileRoutes);
+  await app.register(adminRoutes);
 
   /* Mini App statik fayllari (bitta deploy: back + front) */
   if (config.SERVE_WEB && fs.existsSync(config.webDistDir)) {

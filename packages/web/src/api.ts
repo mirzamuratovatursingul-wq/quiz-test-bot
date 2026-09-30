@@ -1,4 +1,10 @@
 import type {
+  AdminGroupDetailDTO,
+  AdminGroupRowDTO,
+  AdminOverviewDTO,
+  AdminPage,
+  AdminUserDetailDTO,
+  AdminUserRowDTO,
   DraftDTO,
   DraftSummaryDTO,
   Question,
@@ -71,8 +77,21 @@ export interface StatsOverview {
   totals: { races: number; participants: number; answers: number; correctRate: number };
 }
 
+export interface AppConfig {
+  botUsername: string | null;
+  /** .env dagi ADMIN_IDS ro'yxatidami */
+  isAdmin: boolean;
+}
+
 /** Sessiya davomida o'zgarmaydi — bir marta so'raladi */
-let configPromise: Promise<{ botUsername: string | null }> | null = null;
+let configPromise: Promise<AppConfig> | null = null;
+
+const qs = (params: Record<string, string | number | undefined>) =>
+  new URLSearchParams(
+    Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== '')
+      .map(([k, v]) => [k, String(v)]),
+  ).toString();
 
 export const api = {
   /* Profil */
@@ -82,7 +101,7 @@ export const api = {
     ),
   stats: () => request<StatsOverview>('/api/stats'),
   config: () => {
-    configPromise ??= request<{ botUsername: string | null }>('/api/config').catch((err) => {
+    configPromise ??= request<AppConfig>('/api/config').catch((err) => {
       configPromise = null; // xato bo'lsa keyingi safar qayta so'raladi
       throw err;
     });
@@ -157,4 +176,16 @@ export const api = {
   race: (id: string) => request<{ race: RaceDTO }>(`/api/races/${id}`),
   sendRacePdf: (id: string) => request<{ ok: true }>(`/api/races/${id}/send-pdf`, { method: 'POST' }),
   podiumUrl: (id: string) => `${BASE}/api/races/${id}/podium.png`,
+
+  /* Admin panel (faqat ADMIN_IDS) */
+  admin: {
+    overview: (fresh = false) =>
+      request<{ overview: AdminOverviewDTO }>(`/api/admin/overview${fresh ? '?fresh=1' : ''}`),
+    users: (q: string, page: number) =>
+      request<AdminPage<AdminUserRowDTO>>(`/api/admin/users?${qs({ q, page })}`),
+    user: (id: number) => request<AdminUserDetailDTO>(`/api/admin/users/${id}`),
+    groups: (q: string, page: number) =>
+      request<AdminPage<AdminGroupRowDTO>>(`/api/admin/groups?${qs({ q, page })}`),
+    group: (chatId: number) => request<AdminGroupDetailDTO>(`/api/admin/groups/${chatId}`),
+  },
 };

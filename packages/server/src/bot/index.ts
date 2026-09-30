@@ -66,16 +66,22 @@ export async function startBot(): Promise<BotBundle> {
     throw err;
   });
 
-  await b.bot.api.setMyCommands(
-    [
-      { command: 'start', description: 'Botni ishga tushirish' },
-      { command: 'shablonlarim', description: 'Saqlangan test shablonlari' },
-      { command: 'statistika', description: 'Shaxsiy statistika' },
-      { command: 'nusxa', description: 'Kod orqali shablon nusxasini olish' },
-      { command: 'yordam', description: "Qoʻllanma" },
-    ],
-    { scope: { type: 'all_private_chats' } },
-  );
+  const privateCommands = [
+    { command: 'start', description: 'Botni ishga tushirish' },
+    { command: 'shablonlarim', description: 'Saqlangan test shablonlari' },
+    { command: 'statistika', description: 'Shaxsiy statistika' },
+    { command: 'nusxa', description: 'Kod orqali shablon nusxasini olish' },
+    { command: 'yordam', description: "Qoʻllanma" },
+  ];
+  await b.bot.api.setMyCommands(privateCommands, { scope: { type: 'all_private_chats' } });
+  // /admin faqat adminlarning menyusida (admin botga hali yozmagan bo'lsa Telegram rad etadi — e'tiborsiz)
+  for (const adminId of config.ADMIN_IDS) {
+    await b.bot.api
+      .setMyCommands([...privateCommands, { command: 'admin', description: 'Bot statistikasi (admin)' }], {
+        scope: { type: 'chat', chat_id: adminId },
+      })
+      .catch(() => undefined);
+  }
   await b.bot.api.setMyCommands(
     [
       { command: 'boshlash', description: 'Musobaqani boshlash' },

@@ -258,6 +258,13 @@ Kalit bo‘lmasa, skaner PDF ishlamaydi — ichida matn bo‘lishi kerak.
 **Shaxsiy:** `/start` `/shablonlarim` `/statistika` `/nusxa` `/yordam`
 **Guruh:** `/boshlash` `/toxtat` `/holat` `/yakunlash`
 
+**Admin panel.** `.env` dagi `ADMIN_IDS` (vergul bilan Telegram ID lar) ro‘yxatidagilarga
+Mini App pastki menyusida **Admin** bo‘limi chiqadi (`/admin`, `/admin?tab=users`):
+umumiy ko‘rsatkichlar va 14 kunlik faollik; foydalanuvchilar (qidiruv, har birining
+shablonlari, guruhlarga yuborgan testlari va guruhlari); guruhlar (kim qaysi testni
+o‘tkazgani). Botda adminlar uchun `/admin` — qisqa statistika. Umumiy ko‘rsatkichlar
+60 soniya keshlanadi, ro‘yxatlar 20 tadan yuklanadi — bazaga ortiqcha yuklama tushmaydi.
+
 **Shablonni ulashish.** Shablon sahifasida (yoki bot kartasida) **🔗 Ulashish** → 6 belgili
 noyob kod yaratiladi (masalan `K7M2QX`, chalkash 0/O, 1/I belgilarsiz). Kodni olgan odam uni
 botga yuboradi (`/nusxa K7M2QX`, kodning o‘zi yoki `t.me/<bot>?start=copy_K7M2QX` havolasi)

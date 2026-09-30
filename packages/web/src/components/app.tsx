@@ -1,6 +1,7 @@
-import { ChevronLeft, LayoutGrid, Plus, RotateCw, User2, type LucideIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ChevronLeft, LayoutGrid, Plus, RotateCw, ShieldCheck, User2, type LucideIcon } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { api } from '@/api';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -132,7 +133,23 @@ export function IconTile({ emoji, tone = 'primary' }: { emoji: string; tone?: 'p
   );
 }
 
-const NAV_ROUTES = ['/', '/new', '/profile'];
+const NAV_ROUTES = ['/', '/new', '/profile', '/admin'];
+
+/** Joriy foydalanuvchi bot adminimi (.env dagi ADMIN_IDS) — /api/config keshlangan */
+export function useIsAdmin(): boolean {
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api
+      .config()
+      .then((c) => alive && setAdmin(c.isAdmin))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return admin;
+}
 
 /**
  * Pastki navigatsiya: faqat asosiy bo'limlarda ko'rinadi.
@@ -140,12 +157,14 @@ const NAV_ROUTES = ['/', '/new', '/profile'];
  */
 export function BottomNav() {
   const { pathname } = useLocation();
+  const admin = useIsAdmin();
   if (!NAV_ROUTES.includes(pathname)) return null;
 
   const items: { to: string; icon: LucideIcon; label: string; end?: boolean }[] = [
     { to: '/', icon: LayoutGrid, label: 'Shablonlar', end: true },
     { to: '/new', icon: Plus, label: 'Yangi test' },
     { to: '/profile', icon: User2, label: 'Profil' },
+    ...(admin ? [{ to: '/admin', icon: ShieldCheck, label: 'Admin' }] : []),
   ];
 
   return (

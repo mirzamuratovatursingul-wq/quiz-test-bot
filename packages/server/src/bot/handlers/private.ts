@@ -7,7 +7,8 @@ import {
   type ParseResult,
   type Question,
 } from '@testrace/shared';
-import { config } from '../../config.js';
+import { config, isAdmin } from '../../config.js';
+import { getOverview } from '../../services/admin.service.js';
 import { Draft, Template, User } from '../../db/models.js';
 import { logger } from '../../logger.js';
 import { ExtractError } from '../../services/extract.service.js';
@@ -240,6 +241,28 @@ export function registerPrivateHandlers(bot: Bot) {
         reply_markup: openAppKeyboard('/'),
       });
     }
+  });
+
+  /* /admin — bot egasi uchun qisqa statistika (faqat .env dagi ADMIN_IDS) */
+  bot.chatType('private').command('admin', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return; // oddiy foydalanuvchiga buyruq borligini ham bildirmaymiz
+    const o = await getOverview();
+    const t = o.totals;
+    const last7 = o.daily.slice(-7);
+    const racesWeek = last7.reduce((s, d) => s + d.races, 0);
+    await ctx.reply(
+      [
+        '\u{1F6E1} <b>Admin · bot statistikasi</b>',
+        '',
+        `\u{1F465} Foydalanuvchilar: <b>${t.users}</b> · 24 soatda faol: <b>${t.active24h}</b> · 7 kunda yangi: <b>${t.newUsers7d}</b>`,
+        `\u{1F4DA} Shablonlar: <b>${t.templates}</b> (nusxa: ${t.copiedTemplates}) · qoralama: ${t.drafts}`,
+        `\u{1F3C1} Oʻtkazilgan testlar: <b>${t.racesFinished}</b> · 7 kunda: <b>${racesWeek}</b> · hozir ketmoqda: ${t.racesActive}`,
+        `\u{1F4AC} Guruhlar: <b>${t.groupsActive}</b> faol (${t.groupsTotal} dan)`,
+        '',
+        `<i>${new Date(o.generatedAt).toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' })} holatiga</i>`,
+      ].join('\n'),
+      { parse_mode: 'HTML', reply_markup: openAppKeyboard('/admin', '\u{1F6E1} Admin panelni ochish') },
+    );
   });
 
   /* /nusxa K7M2QX — kod bo'yicha shablon nusxasini olish */

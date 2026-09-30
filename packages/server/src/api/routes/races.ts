@@ -8,7 +8,7 @@ import { fetchUserAvatar } from '../../services/telegram.service.js';
 import { getBot } from '../../bot/index.js';
 import { currentUser, requireAuth } from '../auth.js';
 import { logger } from '../../logger.js';
-import { config } from '../../config.js';
+import { config, isAdmin } from '../../config.js';
 import { shouldTouch, touchUser, userUpdate } from '../../services/user-touch.service.js';
 
 /** Ro'yxat uchun savollarning faqat statistikasi kerak — matn va variantlar bazadan olinmaydi */
@@ -173,7 +173,10 @@ export async function profileRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth);
 
   /* Mini App sozlamalari — bazaga murojaatsiz (TemplateView faqat bot nomi uchun chaqiradi) */
-  app.get('/api/config', async () => ({ botUsername: config.BOT_USERNAME ?? null }));
+  app.get('/api/config', async (req) => ({
+    botUsername: config.BOT_USERNAME ?? null,
+    isAdmin: isAdmin(currentUser(req).id),
+  }));
 
   app.get('/api/me', async (req) => {
     const user = currentUser(req);

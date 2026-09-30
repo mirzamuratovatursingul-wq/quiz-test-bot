@@ -304,6 +304,55 @@ console.log('\n11) Ulashish: kod orqali nusxa olish');
   check('notoʻgʻri formatdagi kod — 400', badCode.statusCode === 400, badCode.statusCode);
 }
 
+console.log('\n12) Admin panel');
+{
+  const { config } = await import('../config.js');
+  const { Group } = await import('../db/models.js');
+  await Group.create({ chatId: -1001234, title: 'Smoke guruh', racesCount: 1, isActive: true });
+
+  config.ADMIN_IDS = [];
+  const denied = await app.inject({ method: 'GET', url: '/api/admin/overview' });
+  check('admin boʻlmaganga 403', denied.statusCode === 403, denied.statusCode);
+  const cfgUser = await app.inject({ method: 'GET', url: '/api/config' });
+  check('/api/config: isAdmin=false', cfgUser.json().isAdmin === false, cfgUser.body);
+
+  config.ADMIN_IDS = [USER_ID];
+  const cfgAdmin = await app.inject({ method: 'GET', url: '/api/config' });
+  check('/api/config: isAdmin=true', cfgAdmin.json().isAdmin === true, cfgAdmin.body);
+
+  const ov = await app.inject({ method: 'GET', url: '/api/admin/overview' });
+  const o = ov.json().overview;
+  check('umumiy koʻrsatkichlar 200', ov.statusCode === 200, ov.body);
+  check('foydalanuvchilar sanaldi', o?.totals.users >= 2, o?.totals);
+  check('tugagan testlar sanaldi', o?.totals.racesFinished >= 1, o?.totals);
+  check('14 kunlik grafik maʼlumoti', o?.daily.length === 14, o?.daily?.length);
+  check('faol guruhlar roʻyxatida', o?.topGroups.some((g: { chatId: number }) => g.chatId === -1001234), o?.topGroups);
+  const ov2 = await app.inject({ method: 'GET', url: '/api/admin/overview' });
+  check('takroriy soʻrov keshdan (bazaga bormadi)', ov2.json().overview.generatedAt === o.generatedAt);
+
+  const users = await app.inject({ method: 'GET', url: '/api/admin/users' });
+  const me = users.json().items.find((u: { telegramId: number }) => u.telegramId === USER_ID);
+  check('foydalanuvchilar roʻyxati', users.statusCode === 200 && Boolean(me), users.body);
+  check('shablon va test soni koʻrinadi', me?.templates >= 1 && me?.racesHosted >= 1 && me?.groups >= 1, me);
+  check('admin belgisi', me?.isAdmin === true);
+  const search = await app.inject({ method: 'GET', url: '/api/admin/users?q=Ustoz' });
+  check('ism boʻyicha qidiruv', search.json().items.length === 1 && search.json().items[0].name === 'Ustoz', search.body);
+
+  const detail = await app.inject({ method: 'GET', url: `/api/admin/users/${USER_ID}` });
+  const d = detail.json();
+  check('foydalanuvchi tafsiloti: shablonlar', d.templates?.length >= 1, d.templates);
+  check('foydalanuvchi tafsiloti: guruhlari', d.groups?.some((g: { chatId: number }) => g.chatId === -1001234), d.groups);
+  check('foydalanuvchi tafsiloti: testlari', d.races?.[0]?.participants === 2, d.races?.[0]);
+
+  const groups = await app.inject({ method: 'GET', url: '/api/admin/groups' });
+  check('guruhlar roʻyxati', groups.json().items.some((g: { chatId: number }) => g.chatId === -1001234), groups.body);
+  const gd = await app.inject({ method: 'GET', url: '/api/admin/groups/-1001234' });
+  check('guruh tafsiloti: kim yuborgan', gd.json().hosts?.[0]?.telegramId === USER_ID, gd.body);
+  check('guruh tafsiloti: testlar', gd.json().races?.[0]?.templateTitle === 'Smoke shablon', gd.json().races);
+  const missing = await app.inject({ method: 'GET', url: '/api/admin/users/123' });
+  check('yoʻq foydalanuvchi — 404', missing.statusCode === 404, missing.statusCode);
+}
+
 await app.close();
 await mongoose.disconnect();
 await mongo.stop();

@@ -9,6 +9,8 @@ process.env.BOT_TOKEN = '0000000000:PREVIEW_TOKEN_NOT_REAL_00000000000';
 process.env.DEV_USER_ID = '777000';
 process.env.SERVE_WEB = 'true';
 process.env.PORT = '3100';
+// Admin panelni ham ko'rish uchun (/admin)
+process.env.ADMIN_IDS = '777000';
 
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
@@ -109,6 +111,46 @@ const race = await Race.create({
     { userId: 4, firstName: 'Malika', username: 'malika', score: 540, correct: 3, wrong: 3, missed: 1, totalTimeMs: 30000, answered: 6, place: 4 },
   ],
 });
+
+/* Admin panel uchun namuna: 14 kunga tarqalgan foydalanuvchilar, guruhlar va testlar */
+{
+  const { Group } = await import('../db/models.js');
+  const DAY = 24 * 60 * 60 * 1000;
+  const names = ['Dilnoza', 'Jasur', 'Madina', 'Sherzod', 'Nilufar', 'Bekzod', 'Kamola', 'Otabek', 'Zarina', 'Sardor', 'Feruza', 'Umid'];
+  await User.insertMany(
+    names.map((firstName, i) => ({
+      telegramId: 900_000 + i,
+      firstName,
+      username: i % 3 === 0 ? '' : firstName.toLowerCase(),
+      createdAt: new Date(Date.now() - ((i * 5) % 14) * DAY),
+      lastSeenAt: new Date(Date.now() - i * 3.7 * 60 * 60 * 1000),
+      stats: { racesPlayed: i % 4 },
+    })),
+  );
+  await Group.insertMany([
+    { chatId: -1001234, title: '7-A sinf', type: 'supergroup', racesCount: 9, isActive: true },
+    { chatId: -1005678, title: 'Matematika toʻgaragi', type: 'supergroup', racesCount: 4, isActive: true },
+    { chatId: -1009012, title: 'Ingliz tili · B1', type: 'group', racesCount: 1, isActive: false },
+  ]);
+  const counts = [1, 0, 2, 3, 1, 0, 0, 4, 2, 1, 3, 5, 2, 3];
+  const races = counts.flatMap((n, dayAgo) =>
+    Array.from({ length: n }, (_, k) => ({
+      templateId: template._id,
+      templateTitle: k % 2 ? 'Ona tili · 8-sinf' : template.title,
+      ownerId: USER,
+      hostId: k % 3 === 0 ? 900_001 : USER,
+      chatId: k % 2 ? -1005678 : -1001234,
+      chatTitle: k % 2 ? 'Matematika toʻgaragi' : '7-A sinf',
+      status: 'finished',
+      untimed: k % 4 === 1,
+      finishedAt: new Date(Date.now() - (13 - dayAgo) * DAY),
+      createdAt: new Date(Date.now() - (13 - dayAgo) * DAY),
+      questions: parsed.questions.slice(0, 5).map((q) => ({ text: q.text, options: q.options, correctIndex: q.correctIndex })),
+      participants: [{ userId: 900_002, firstName: 'Madina', score: 300, correct: 3, answered: 5 }],
+    })),
+  );
+  await Race.insertMany(races);
+}
 
 await startApi();
 

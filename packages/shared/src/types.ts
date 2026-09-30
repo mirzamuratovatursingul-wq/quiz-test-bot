@@ -200,6 +200,104 @@ export interface UserProfileDTO {
   createdAt: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Admin panel                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface AdminOverviewDTO {
+  totals: {
+    users: number;
+    active24h: number;
+    active7d: number;
+    newUsers7d: number;
+    /** Kamida bir marta musobaqada qatnashgan foydalanuvchilar */
+    players: number;
+    templates: number;
+    /** Kod orqali olingan nusxalar */
+    copiedTemplates: number;
+    drafts: number;
+    racesFinished: number;
+    /** Hozir guruhlarda ketayotgan (yoki boshlanishini kutayotgan) */
+    racesActive: number;
+    groupsActive: number;
+    groupsTotal: number;
+  };
+  /** Oxirgi 14 kun (eskidan yangiga), Toshkent vaqti bilan */
+  daily: { date: string; users: number; races: number }[];
+  topCreators: { telegramId: number; name: string; templates: number }[];
+  topGroups: { chatId: number; title: string; races: number }[];
+  generatedAt: string;
+}
+
+export interface AdminUserRowDTO {
+  telegramId: number;
+  name: string;
+  username: string;
+  createdAt: string;
+  lastSeenAt: string | null;
+  /** Shablonlari (kod orqali olingan nusxalar ham) */
+  templates: number;
+  /** Guruhlarga yuborib o'tkazgan testlari */
+  racesHosted: number;
+  /** Test o'tkazgan guruhlari soni */
+  groups: number;
+  /** Ishtirokchi sifatida qatnashgan */
+  racesPlayed: number;
+  isAdmin: boolean;
+}
+
+export interface AdminRaceRowDTO {
+  id: string;
+  templateTitle: string;
+  chatId: number;
+  chatTitle: string;
+  hostId: number;
+  hostName: string;
+  status: RaceStatus;
+  untimed: boolean;
+  questions: number;
+  participants: number;
+  createdAt: string;
+}
+
+export interface AdminUserDetailDTO {
+  user: AdminUserRowDTO;
+  templates: {
+    id: string;
+    title: string;
+    questions: number;
+    racesCount: number;
+    createdAt: string;
+    copiedFrom: string | null;
+    shared: boolean;
+  }[];
+  races: AdminRaceRowDTO[];
+  groups: { chatId: number; title: string; races: number; lastAt: string }[];
+}
+
+export interface AdminGroupRowDTO {
+  chatId: number;
+  title: string;
+  type: string;
+  isActive: boolean;
+  races: number;
+  addedAt: string;
+  lastActivityAt: string;
+}
+
+export interface AdminGroupDetailDTO {
+  group: AdminGroupRowDTO;
+  races: AdminRaceRowDTO[];
+  hosts: { telegramId: number; name: string; races: number }[];
+}
+
+export interface AdminPage<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface ApiError {
   error: string;
   message: string;

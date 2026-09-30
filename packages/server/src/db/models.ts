@@ -28,6 +28,10 @@ const userSchema = new Schema(
   { timestamps: true },
 );
 
+// Admin panel: faollik bo'yicha saralash va kunlik yangi foydalanuvchilar
+userSchema.index({ lastSeenAt: -1 });
+userSchema.index({ createdAt: -1 });
+
 export type UserDoc = HydratedDocument<InferSchemaType<typeof userSchema>>;
 export const User = model('User', userSchema);
 
@@ -212,6 +216,9 @@ raceSchema.index({ ownerId: 1, status: 1, finishedAt: -1 });
 raceSchema.index({ templateId: 1, status: 1, finishedAt: -1 });
 // Bot qayta ishga tushganda ochiq vaqtsiz testlarni topish
 raceSchema.index({ status: 1, untimed: 1 });
+// Admin panel: kunlik faollik, foydalanuvchi guruhga yuborgan testlar
+raceSchema.index({ status: 1, finishedAt: -1 });
+raceSchema.index({ hostId: 1, createdAt: -1 });
 
 export type RaceDoc = HydratedDocument<InferSchemaType<typeof raceSchema>>;
 export const Race = model('Race', raceSchema);
@@ -232,6 +239,8 @@ const groupSchema = new Schema(
   },
   { timestamps: true },
 );
+
+groupSchema.index({ updatedAt: -1 });
 
 export type GroupDoc = HydratedDocument<InferSchemaType<typeof groupSchema>>;
 export const Group = model('Group', groupSchema);

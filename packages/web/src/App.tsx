@@ -10,6 +10,7 @@ const NewTest = lazy(() => import('@/pages/NewTest'));
 const Profile = lazy(() => import('@/pages/Profile'));
 const RaceDetail = lazy(() => import('@/pages/RaceDetail'));
 const TemplateView = lazy(() => import('@/pages/TemplateView'));
+const Admin = lazy(() => import('@/pages/Admin'));
 
 function PageFallback() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/template/:id" element={<TemplateView />} />
           <Route path="/race/:id" element={<RaceDetail />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/admin" element={<Admin />} />
           <Route path="*" element={<Home />} />
         </Routes>
       </Suspense>
