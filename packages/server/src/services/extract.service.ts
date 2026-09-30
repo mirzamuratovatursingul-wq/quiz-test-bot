@@ -72,11 +72,16 @@ async function extractDocx(buffer: Buffer): Promise<string> {
     .join('\n');
 }
 
-/** PDF/DOCX/TXT bufferdan toza matn ajratib olish */
+/**
+ * PDF/DOCX/TXT bufferdan toza matn ajratib olish.
+ * `allowEmptyPdf` — skaner (rasmli) PDF da xato o'rniga bo'sh matn qaytariladi
+ * (AI PDF ning o'zini o'qiy oladi).
+ */
 export async function extractText(
   buffer: Buffer,
   fileName: string,
   mimeType?: string,
+  options: { allowEmptyPdf?: boolean } = {},
 ): Promise<ExtractResult> {
   const sourceType = detectSourceType(fileName, mimeType);
 
@@ -84,7 +89,7 @@ export async function extractText(
     if (sourceType === 'pdf') {
       const res = await pdfParse(buffer);
       const text = (res.text ?? '').trim();
-      if (!text) {
+      if (!text && !options.allowEmptyPdf) {
         throw new ExtractError(
           'PDF ichidan matn topilmadi. Ehtimol u skaner (rasm) koʻrinishida. Matnli PDF yoki Word yuboring.',
         );

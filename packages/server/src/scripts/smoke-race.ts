@@ -115,7 +115,12 @@ const mockApi = {
   async getChatMember(_chatId: number, userId: number) {
     return { status: userId === OWNER ? 'administrator' : 'member' };
   },
+  async stopPoll(_chatId: number, msgId: number) {
+    stoppedPolls.push(msgId);
+    return {};
+  },
 };
+const stoppedPolls: number[] = [];
 
 const mockBot = { api: mockApi } as unknown as Bot;
 const engine = new RaceEngine(mockBot);
@@ -213,6 +218,9 @@ check('guruh admini boshladi', started.ok, started.message);
 
 console.log('\n3) 1-savol: quiz soʻrovnomasi');
 check('soʻrovnoma yuborildi', await waitFor(() => polls.length >= 1));
+// Soxta API so'rovnomani sinxron qo'shadi, dvigatel esa uni bir necha mikrotaskdan keyin
+// ro'yxatga oladi (haqiqiy Telegram'da javob HTTP javobidan keyin keladi)
+await sleep(10);
 const p1 = polls[0]!;
 check('quiz tipida, 3 variant', p1.options.length === 3, p1.options);
 check('toʻgʻri javob belgilangan', p1.correct[0] === 0, p1.correct);
@@ -250,6 +258,7 @@ await answerPoll(p1.pollId, VALI, 1); // ikkinchi urinish e'tiborga olinmaydi
 
 console.log('\n4) 2-savol');
 check('2-savol chiqdi', await waitFor(() => polls.length >= 2, 15000));
+await sleep(10);
 const p2 = polls[1]!;
 await answerPoll(p2.pollId, VALI, 1); // to'g'ri
 await answerPoll(p2.pollId, ALI, 0); // xato
@@ -257,6 +266,7 @@ await answerPoll(p2.pollId, SANO, 1); // kech qo'shildi, to'g'ri
 
 console.log('\n5) 3-savol: uzun matn alohida xabarda');
 check('3-savol chiqdi', await waitFor(() => polls.length >= 3, 15000));
+await sleep(10);
 const p3 = polls[2]!;
 check('soʻrovnoma savoli 300 belgidan oshmadi', p3.question.length <= 300, p3.question.length);
 check(
@@ -329,6 +339,92 @@ check('egasi statistikasi yangilandi', owner?.stats?.racesHosted === 1, owner?.s
 const tpl = await Template.findById(template._id);
 check('shablon musobaqa soni oshdi', tpl?.racesCount === 1, tpl?.racesCount);
 check('faol musobaqa tozalandi', !engine.isActive(CHAT_ID));
+
+/* ---------------- Vaqtsiz rejim: oddiy so'rovnoma ---------------- */
+
+console.log('\n8) Vaqtsiz test: hamma savol birdaniga');
+const UNTIMED_CHAT = -1008888;
+const untimedTpl = await Template.create({
+  ownerId: OWNER,
+  title: 'Vaqtsiz sinov',
+  status: 'ready',
+  questions: [
+    { text: 'Bir?', options: [{ text: 'a' }, { text: 'b' }], correctIndex: 0 },
+    { text: 'Ikki?', options: [{ text: 'a' }, { text: 'b' }], correctIndex: 1 },
+    { text: 'Uch?', options: [{ text: 'a' }, { text: 'b' }], correctIndex: 0 },
+  ],
+  settings: { timePerQuestion: 0, shuffleQuestions: false, shuffleOptions: false, questionLimit: 0, speedBonus: true },
+});
+
+const pollsBefore = polls.length;
+const uCreated = await engine.createRace({
+  chatId: UNTIMED_CHAT,
+  chatTitle: 'Vaqtsiz guruh',
+  hostId: OWNER,
+  templateId: String(untimedTpl._id),
+});
+check('vaqtsiz test yaratildi', uCreated.ok, uCreated.message);
+const uIntro = sent.at(-1);
+check('kartochkada "vaqtsiz" yozilgan', Boolean(uIntro?.text.includes('vaqtsiz')), uIntro?.text);
+
+const uNotAdmin = await engine.start(UNTIMED_CHAT, ALI.id);
+check('admin boʻlmagan yubora olmadi', !uNotAdmin.ok);
+const uStarted = await engine.start(UNTIMED_CHAT, OWNER);
+check('admin savollarni yubordi', uStarted.ok, uStarted.message);
+
+check('3 ta soʻrovnoma yuborildi', await waitFor(() => polls.length >= pollsBefore + 3, 15000));
+const uPolls = polls.slice(pollsBefore, pollsBefore + 3);
+check('vaqt chegarasi yoʻq (open_period berilmagan)', uPolls.every((p) => p.openPeriod === undefined), uPolls.map((p) => p.openPeriod));
+check('quiz: toʻgʻri javob belgilangan', uPolls[1]?.correct[0] === 1, uPolls[1]?.correct);
+check(
+  'yakunlash tugmasi chiqdi',
+  await waitFor(() => sent.some((m) => m.keyboard.some((k) => k.startsWith('race:finish:')))),
+);
+
+// Istalgan tartibda javob berish mumkin
+await answerPoll(uPolls[2]!.pollId, ALI, 0); // to'g'ri
+await answerPoll(uPolls[0]!.pollId, ALI, 0); // to'g'ri
+await answerPoll(uPolls[1]!.pollId, ALI, 0); // xato
+await answerPoll(uPolls[0]!.pollId, VALI, 0); // to'g'ri
+await answerPoll(uPolls[0]!.pollId, VALI, 1); // takror — hisobga olinmaydi
+
+const uNotAdminFinish = await engine.finishUntimed(UNTIMED_CHAT, ALI.id);
+check('admin boʻlmagan yakunlay olmadi', !uNotAdminFinish.ok, uNotAdminFinish.message);
+
+console.log('\n9) Bot qayta ishga tushdi — vaqtsiz test tiklanadi');
+await sleep(2600); // javoblar bazaga yozilishi uchun
+const staleClosed = await RaceEngine.cleanupStale();
+const engine2 = new RaceEngine(mockBot);
+const restored = await engine2.restoreUntimed();
+check('ochiq vaqtsiz test yopilmadi va tiklandi', restored === 1, { restored, staleClosed });
+check('tiklangan test faol', engine2.isActive(UNTIMED_CHAT));
+await engine2.handlePollAnswer({
+  poll_id: uPolls[1]!.pollId,
+  user: { id: SANO.id, is_bot: false, first_name: SANO.first_name },
+  option_ids: [1],
+} as unknown as PollAnswer); // qayta ishga tushgandan keyin javob — to'g'ri
+
+const uFinished = await engine2.finishUntimed(UNTIMED_CHAT, OWNER);
+check('admin yakunladi', uFinished.ok, uFinished.message);
+check('3 ta soʻrovnoma yopildi', await waitFor(() => stoppedPolls.length >= 3), stoppedPolls);
+check(
+  'natijalar eʼlon qilindi',
+  await waitFor(() => sent.some((m) => m.text.includes('Yakuniy natijalar') && m.text.includes('Vaqtsiz sinov')), 15000),
+);
+const uFinal = sent.find((m) => m.text.includes('Yakuniy natijalar') && m.text.includes('Vaqtsiz sinov'));
+check('reytingda javob tezligi (⚡) koʻrsatilmadi', !uFinal?.text.includes('⚡'), uFinal?.text);
+
+await sleep(400);
+const uDoc = await Race.findOne({ chatId: UNTIMED_CHAT }).sort({ createdAt: -1 });
+check('holat: finished', uDoc?.status === 'finished', uDoc?.status);
+const uAli = uDoc?.participants.find((p) => p.userId === ALI.id);
+const uVali = uDoc?.participants.find((p) => p.userId === VALI.id);
+const uSano = uDoc?.participants.find((p) => p.userId === SANO.id);
+check('Ali: 2 toʻgʻri, 1 xato, 200 ball', uAli?.correct === 2 && uAli?.wrong === 1 && uAli?.score === 200, uAli);
+check('Vali: 1 toʻgʻri, 2 ta javobsiz', uVali?.correct === 1 && uVali?.missed === 2, uVali);
+check('Sanobar (qayta ishga tushgandan keyin) hisobga olindi', uSano?.correct === 1, uSano);
+check('Ali 1-oʻrinda', uAli?.place === 1, uAli?.place);
+check('tiklangan dvigatel tozalandi', !engine2.isActive(UNTIMED_CHAT));
 
 // DUMP=1 bilan ishga tushirilsa, Telegramda qanday koʻrinishini chop etadi
 if (process.env.DUMP === '1') {

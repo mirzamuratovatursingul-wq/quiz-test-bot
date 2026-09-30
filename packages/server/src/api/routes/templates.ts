@@ -1,7 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { InputFile } from 'grammy';
 import { z } from 'zod';
-import type { Question, TemplateDTO } from '@testrace/shared';
+import {
+  MAX_TIME_PER_QUESTION,
+  MIN_TIME_PER_QUESTION,
+  UNTIMED,
+  type Question,
+  type TemplateDTO,
+} from '@testrace/shared';
 import { Template, User } from '../../db/models.js';
 import { buildTestPdf } from '../../services/pdf.service.js';
 import { currentUser, requireAuth } from '../auth.js';
@@ -15,8 +21,16 @@ const questionSchema = z.object({
   explanation: z.string().max(1000).optional(),
 });
 
+/** Savolga vaqt: 0 (vaqtsiz, oddiy so'rovnoma) yoki 5–120 soniya */
+export const timePerQuestionSchema = z
+  .number()
+  .int()
+  .refine((v) => v === UNTIMED || (v >= MIN_TIME_PER_QUESTION && v <= MAX_TIME_PER_QUESTION), {
+    message: `Vaqt 0 (vaqtsiz) yoki ${MIN_TIME_PER_QUESTION}–${MAX_TIME_PER_QUESTION} soniya boʻlishi kerak`,
+  });
+
 const settingsSchema = z.object({
-  timePerQuestion: z.number().int().min(5).max(120),
+  timePerQuestion: timePerQuestionSchema,
   shuffleQuestions: z.boolean(),
   shuffleOptions: z.boolean(),
   questionLimit: z.number().int().min(0).max(500),

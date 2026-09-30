@@ -176,6 +176,7 @@ Environment Variables (namunasi: `.env.production.example`):
 | `MONGODB_URI` | Atlas ulanish satri |
 | `WEBAPP_URL` | Vercel bergan manzil |
 | `SERVE_WEB` | `false` (Mini App Vercel’da) |
+| `GEMINI_API_KEY` | AI tahlil uchun (ixtiyoriy, [bepul](https://aistudio.google.com/apikey)) |
 | `PORT` | host beradi, odatda avtomatik |
 
 ### C. Yakuniy ulash
@@ -217,18 +218,51 @@ Javoblar kaliti:
 
 **3. Word’da qalin (bold) javob** — `.docx` da `+` bo‘lmasa, qalin variant to‘g‘ri deb olinadi.
 
-Qo‘llab-quvvatlanadi: `1.` `1)` `1]` raqamlash; `A)` `A.` `A:` `A -` variantlar; lotin va kirill;
-`====` ajratgichlar; sahifa raqamlari va sarlavhalar avtomatik tashlab ketiladi.
+Qo‘llab-quvvatlanadi:
+- raqamlash: `1.` `1)` `1]` `1-savol.` `№1` `Savol 1:` — raqamlar ketma-ketligi bo‘yicha aniqlanadi,
+  shuning uchun `1) 2) 3)` ko‘rinishidagi raqamli variantlar savol deb olinmaydi;
+- variantlar: `A)` `A.` `A:` `A -` `(A)`, kirill `А) Б) В) Г)`, harfsiz (`+Toshkent` / `Samarqand`),
+  `+` / `-` bilan; bir qatorda bir nechta variant (`A) 12  +B) 14  C) 16`, PDF’dagi `A)12B)14` ham);
+- keyingi qatorga o‘tib ketgan uzun savol va variantlar birlashtiriladi;
+- to‘g‘ri javob: `+A)`, `A) +`, `(+)`, savol ostida `Javob: B`, oxirida kalit (`1-A 2-C` yoki jadval);
+- teg formatlari: HEMIS (`++++` / `====` / `#`), `S:` / `+:` / `-:`, `?` / `+` / `-`, `<question>` / `<variant>`;
+- sahifa raqamlari, sarlavhalar va bo‘lim nomlari (`2-variant`) tashlab ketiladi.
 
-> Skaner qilingan (rasm) PDF ishlamaydi — ichida matn bo‘lishi kerak.
 > Uzun savol/variantlar so‘rovnomaga sig‘masa, to‘liq matni alohida xabarda chiqadi.
+
+### AI tahlil (ixtiyoriy, bepul)
+
+`.env` ga `GEMINI_API_KEY` yozilsa ([bepul kalit](https://aistudio.google.com/apikey)), oddiy
+tahlilchi natijasi ishonchsiz bo‘lganda fayl Google Gemini’ga yuboriladi. Ishonchsiz degani:
+tuzilmasi buzilgan savollar bor, variantlar soni notekis yoki javobi aniqlanmaganlar ko‘p.
+Gemini PDF’ning o‘zini ko‘radi, shuning uchun quyidagilarni ham tushunadi:
+
+- skaner (rasm) PDF;
+- ikki ustunli sahifalar;
+- qalin, rangli yoki tagiga chizib belgilangan to‘g‘ri javob.
+
+- AI to‘g‘ri javobni **o‘zi topmaydi** — faqat hujjatda belgilanganini oladi, qolganini
+  foydalanuvchi panelda belgilaydi.
+- Ikkala natijadan sifat bahosi yuqorisi olinadi. AI ishlamasa (limit, tarmoq), oddiy natija qoladi.
+- `GEMINI_MODEL` — vergul bilan bir nechta model: biri ishlamasa yoki limiti tugasa, keyingisi sinaladi.
+- `AI_MODE=auto|always|off`.
+- Bepul tarifda so‘rovlar soni cheklangan, Google esa yuborilgan ma’lumotdan modelni
+  yaxshilash uchun foydalanishi mumkin. Maxfiy testlar uchun pullik tarifni yoki `AI_MODE=off` ni tanlang.
+
+Kalit bo‘lmasa, skaner PDF ishlamaydi — ichida matn bo‘lishi kerak.
 
 ---
 
 ## Buyruqlar
 
 **Shaxsiy:** `/start` `/shablonlarim` `/statistika` `/yordam`
-**Guruh:** `/boshlash` `/toxtat` `/holat`
+**Guruh:** `/boshlash` `/toxtat` `/holat` `/yakunlash`
+
+**Vaqtsiz rejim.** Sozlamalarda "⏱ Vaqt" → **Vaqtsiz** tanlansa, test guruhga oddiy quiz
+so‘rovnomalari bo‘lib birdaniga yuboriladi. Vaqt chegarasi yo‘q, har kim istalgan paytda
+javob beradi, har bir to‘g‘ri javob 100 ball. Admin **«Yakunlash va natijalar»** tugmasini
+bosganda yoki `/yakunlash` yozganda so‘rovnomalar yopiladi va reyting e’lon qilinadi.
+Bot qayta ishga tushsa (deploy), ochiq test tiklanadi va javoblar yo‘qolmaydi.
 
 ---
 
@@ -237,9 +271,11 @@ Qo‘llab-quvvatlanadi: `1.` `1)` `1]` raqamlash; `A)` `A.` `A:` `A -` variantla
 Tashqi xizmat kerak emas — MongoDB xotirada, Telegram API soxta (mock):
 
 ```bash
-npm test                                  # API (33) + musobaqa (40) sinovlari
+npm test                                  # formatlar (23) + API (35) + musobaqa (65) sinovlari
 DUMP=1 npm run smoke:race -w @testrace/server   # soʻrovnoma va yakuniy xabar koʻrinishini chop etadi
-npm run check:parser -w @testrace/server  # tahlilchini namuna faylda tekshirish
+npm run check:formats -w @testrace/server # tahlilchini 22 ta format va haqiqiy PDF da tekshirish
+npm run check:parser -w @testrace/server -- ./test.pdf   # istalgan PDF/DOCX/TXT ni tahlil qilib chop etish
+                                          # (GEMINI_API_KEY bo‘lsa AI bilan; --no-ai — faqat oddiy tahlil)
 npm run check:output -w @testrace/server  # PDF va podium rasmini ./out ga chiqarish
 npm run preview:ui -w @testrace/server    # Mini App UI sini Telegramsiz ko‘rish (localhost:3100)
 npm run check:prod -w @testrace/server    # production sozlamalari va indekslarini tekshirish

@@ -1,14 +1,21 @@
 /**
- * Tahlilchini tez tekshirish: namuna faylni o'qib, natijani chop etadi.
+ * Tahlilchini tez tekshirish: faylni o'qib, natijani chop etadi.
  *   npm run check:parser -w @testrace/server -- ./samples/namuna-test.txt
- * Argument berilmasa, ichki namuna ishlatiladi.
+ *   npm run check:parser -w @testrace/server -- ./test.pdf          (PDF / DOCX ham)
+ *   npm run check:parser -w @testrace/server -- ./test.pdf --no-ai  (faqat oddiy tahlilchi)
+ * Argument berilmasa, ichki namuna ishlatiladi. GEMINI_API_KEY bo'lsa, bot bilan
+ * bir xil oqim ishlaydi: oddiy tahlil ishonchsiz bo'lsa AI ga yuboriladi.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { optionLabel, parseTestText } from '@testrace/shared';
+import { assessParseQuality, optionLabel, parseTestText, type ParseResult } from '@testrace/shared';
 import { ROOT_DIR } from '../config.js';
+import { extractText } from '../services/extract.service.js';
+import { importTestFile } from '../services/test-import.service.js';
 
-const arg = process.argv[2];
+const args = process.argv.slice(2);
+const noAi = args.includes('--no-ai');
+const arg = args.find((a) => !a.startsWith('--'));
 const file = arg ? path.resolve(process.cwd(), arg) : path.join(ROOT_DIR, 'samples', 'namuna-test.txt');
 
 if (!fs.existsSync(file)) {
@@ -16,11 +23,22 @@ if (!fs.existsSync(file)) {
   process.exit(1);
 }
 
-const text = fs.readFileSync(file, 'utf8');
-const result = parseTestText(text);
+const buffer = fs.readFileSync(file);
+let result: ParseResult;
+let engine = 'parser';
 
+if (noAi) {
+  const extracted = await extractText(buffer, path.basename(file));
+  result = parseTestText(extracted.text);
+} else {
+  const imported = await importTestFile(buffer, path.basename(file));
+  result = imported.result;
+  engine = imported.engine;
+}
+
+const quality = assessParseQuality(result);
 console.log(`\nFayl: ${file}`);
-console.log(`Usul: ${result.strategy}`);
+console.log(`Tahlilchi: ${engine} | usul: ${result.strategy} | sifat: ${quality.score.toFixed(2)}${quality.good ? '' : ` (${quality.reasons.join('; ')})`}`);
 console.log(
   `Savollar: ${result.stats.total} | javobi aniq: ${result.stats.withCorrect} | tekshirish kerak: ${result.stats.needsReview}\n`,
 );

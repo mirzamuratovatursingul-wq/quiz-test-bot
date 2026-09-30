@@ -1,9 +1,10 @@
-import { InputFile, type Bot } from 'grammy';
+import { GrammyError, InputFile, type Bot } from 'grammy';
 import type { PollAnswer } from 'grammy/types';
 import {
   assignPlaces,
   computeScore,
   boldOptionLabel,
+  isUntimed,
   medal,
   optionLabel,
   shuffle,
@@ -13,7 +14,7 @@ import { Group, Race, Template, User } from '../db/models.js';
 import { logger } from '../logger.js';
 import { renderPodium, type PodiumEntry } from '../services/podium.service.js';
 import { escapeHtml, fetchUserAvatar } from '../services/telegram.service.js';
-import { raceIntroKeyboard } from '../bot/keyboards.js';
+import { raceIntroKeyboard, untimedControlKeyboard } from '../bot/keyboards.js';
 import { t } from '../bot/texts.js';
 
 /** Telegram so'rovnoma cheklovlari */
@@ -22,6 +23,13 @@ const POLL_OPTION_MAX = 100;
 const POLL_EXPLANATION_MAX = 200;
 /** Savol yopilgandan keyin keyingisigacha tanaffus */
 const NEXT_QUESTION_PAUSE_MS = 1800;
+/**
+ * Vaqtsiz rejimda so'rovnomalar orasidagi tanaffus. Telegram guruhga daqiqasiga
+ * ~20 ta xabar ruxsat beradi; oshib ketsa 429 (retry_after) qaytadi va kutamiz.
+ */
+const UNTIMED_SEND_PAUSE_MS = 1100;
+/** Vaqtsiz rejimda javoblar bazaga shuncha kechikish bilan yoziladi */
+const UNTIMED_PERSIST_DELAY_MS = 2000;
 
 export interface RaceQuestionRuntime {
   text: string;
@@ -32,6 +40,9 @@ export interface RaceQuestionRuntime {
   answeredCount: number;
   correctCount: number;
   optionCounts: number[];
+  /** Vaqtsiz rejim: shu savolning so'rovnomasi */
+  pollId?: string;
+  pollMessageId?: number;
 }
 
 export interface ParticipantRuntime {
@@ -69,6 +80,14 @@ export interface RaceRuntime {
   questionStartedAt: number;
   timer?: NodeJS.Timeout;
   stopping: boolean;
+  /** Vaqtsiz rejim: hamma savol birdaniga, vaqt chegarasi yo'q, admin yakunlaydi */
+  untimed: boolean;
+  /** Vaqtsiz rejim: har bir savolga kim javob bergani */
+  answeredBy: Set<number>[];
+  /** Vaqtsiz rejim: nechta so'rovnoma yuborildi */
+  sentCount: number;
+  controlMessageId?: number;
+  persistTimer?: NodeJS.Timeout;
 }
 
 /**
@@ -169,6 +188,7 @@ export class RaceEngine {
       };
     });
 
+    const untimed = isUntimed(settings?.timePerQuestion);
     const race = await Race.create({
       templateId: template._id,
       templateTitle: template.title,
@@ -180,7 +200,9 @@ export class RaceEngine {
       questions: runtimeQuestions,
       participants: [],
       timePerQuestion: settings?.timePerQuestion ?? 15,
-      speedBonus: settings?.speedBonus ?? true,
+      // Vaqtsiz rejimda tezlik ma'nosiz — har bir to'g'ri javob 100 ball
+      speedBonus: untimed ? false : (settings?.speedBonus ?? true),
+      untimed,
     });
 
     const runtime: RaceRuntime = {
@@ -200,30 +222,50 @@ export class RaceEngine {
       answeredThisQuestion: new Set(),
       questionStartedAt: 0,
       stopping: false,
+      untimed,
+      answeredBy: runtimeQuestions.map(() => new Set<number>()),
+      sentCount: 0,
     };
     this.runtimes.set(params.chatId, runtime);
 
-    const msg = await this.bot.api.sendMessage(
-      params.chatId,
-      [
-        `\u{1F3C1} <b>Test musobaqasi</b>`,
-        '',
-        `\u{1F4DA} <b>${escapeHtml(runtime.title)}</b>`,
-        `❓ Savollar: <b>${runtime.questions.length}</b> ta`,
-        `⏱ Har bir savolga: <b>${runtime.timePerQuestion}</b> soniya`,
-        runtime.speedBonus
-          ? `⚡ Ball: toʻgʻri javob <b>100</b> + tezlik uchun <b>100</b> gacha bonus`
-          : `✅ Ball: har bir toʻgʻri javob <b>100</b>`,
-        '',
-        `<b>Qoidalar</b>`,
-        `\u{1F4DD} Savollar soʻrovnoma boʻlib chiqadi — variantni bosasiz`,
-        `\u{1F512} Har kim <b>bir marta</b> javob beradi, oʻzgartirib boʻlmaydi`,
-        `\u{1F465} Roʻyxatdan oʻtish shart emas — <b>istalgan savoldan</b> qoʻshiling`,
-        '',
-        `\u{1F447} Guruh admini <b>Boshlash</b>ni bosadi — savollarga hamma javob beradi.`,
-      ].join('\n'),
-      { parse_mode: 'HTML', reply_markup: raceIntroKeyboard(runtime.raceId) },
-    );
+    const introLines = untimed
+      ? [
+          `\u{1F4DD} <b>Test</b> · vaqtsiz`,
+          '',
+          `\u{1F4DA} <b>${escapeHtml(runtime.title)}</b>`,
+          `❓ Savollar: <b>${runtime.questions.length}</b> ta`,
+          `✅ Ball: har bir toʻgʻri javob <b>100</b>`,
+          '',
+          `<b>Qoidalar</b>`,
+          `\u{1F4DD} Hamma savol birdaniga soʻrovnoma boʻlib chiqadi`,
+          `⏳ Vaqt chegarasi yoʻq — <b>istalgan paytda</b> javob bering`,
+          `\u{1F512} Har kim <b>bir marta</b> javob beradi, oʻzgartirib boʻlmaydi`,
+          `\u{1F3C1} Natijalar admin <b>Yakunlash</b>ni bosganda eʼlon qilinadi`,
+          '',
+          `\u{1F447} Guruh admini <b>Savollarni yuborish</b>ni bosadi.`,
+        ]
+      : [
+          `\u{1F3C1} <b>Test musobaqasi</b>`,
+          '',
+          `\u{1F4DA} <b>${escapeHtml(runtime.title)}</b>`,
+          `❓ Savollar: <b>${runtime.questions.length}</b> ta`,
+          `⏱ Har bir savolga: <b>${runtime.timePerQuestion}</b> soniya`,
+          runtime.speedBonus
+            ? `⚡ Ball: toʻgʻri javob <b>100</b> + tezlik uchun <b>100</b> gacha bonus`
+            : `✅ Ball: har bir toʻgʻri javob <b>100</b>`,
+          '',
+          `<b>Qoidalar</b>`,
+          `\u{1F4DD} Savollar soʻrovnoma boʻlib chiqadi — variantni bosasiz`,
+          `\u{1F512} Har kim <b>bir marta</b> javob beradi, oʻzgartirib boʻlmaydi`,
+          `\u{1F465} Roʻyxatdan oʻtish shart emas — <b>istalgan savoldan</b> qoʻshiling`,
+          '',
+          `\u{1F447} Guruh admini <b>Boshlash</b>ni bosadi — savollarga hamma javob beradi.`,
+        ];
+
+    const msg = await this.bot.api.sendMessage(params.chatId, introLines.join('\n'), {
+      parse_mode: 'HTML',
+      reply_markup: raceIntroKeyboard(runtime.raceId, untimed),
+    });
     runtime.introMessageId = msg.message_id;
 
     await Group.updateOne(
@@ -232,7 +274,7 @@ export class RaceEngine {
       { upsert: true },
     );
 
-    return { ok: true, message: 'Musobaqa guruhga yuborildi.' };
+    return { ok: true, message: untimed ? 'Test guruhga yuborildi.' : 'Musobaqa guruhga yuborildi.' };
   }
 
   /* ---------------------------------------------------------------- */
@@ -256,6 +298,24 @@ export class RaceEngine {
 
     r.status = 'running';
     await Race.updateOne({ _id: r.raceId }, { $set: { status: 'running', startedAt: new Date() } });
+
+    if (r.untimed) {
+      if (r.introMessageId) {
+        await this.safeEdit(
+          chatId,
+          r.introMessageId,
+          [
+            `\u{1F4DD} <b>${escapeHtml(r.title)}</b>`,
+            `❓ ${r.questions.length} savol · ⏳ vaqtsiz`,
+            '',
+            `\u{1F4E8} Savollar yuborilmoqda — istalgan paytda javob bering.`,
+          ].join('\n'),
+          { parse_mode: 'HTML' },
+        );
+      }
+      void this.sendAllPolls(chatId);
+      return { ok: true, message: 'Savollar yuborilmoqda \u{1F4E8}' };
+    }
 
     if (r.introMessageId) {
       await this.safeEdit(
@@ -307,59 +367,8 @@ export class RaceEngine {
 
     r.answeredThisQuestion = new Set();
 
-    // So'rovnoma savoli: raqam alohida qatorda, matn ostida — o'qishga qulay.
-    // Eslatma: Telegram so'rovnoma savoli va variantlarida qalin shrift ishlamaydi
-    // (faqat custom emoji), shuning uchun tuzilma bo'sh qator va harflar bilan beriladi.
-    const header = `[${r.index + 1}/${r.questions.length}]-savol`;
-    const fullQuestion = `${header}\n\n${q.text}`;
-    // Harf qalin (Unicode), matn oddiy — kirill matnlar ham buzilmaydi.
-    // Harf, qavs va ikki bo'shliq uchun 5 belgi zaxira qoldiriladi.
-    const labeled = q.options.map(
-      (o, i) => `${boldOptionLabel(i)})  ${truncate(o.text, POLL_OPTION_MAX - 5)}`,
-    );
-
-    const needsLongForm =
-      fullQuestion.length > POLL_QUESTION_MAX || labeled.some((o) => o.length > POLL_OPTION_MAX);
-
-    // Uzun savol/variantlar so'rovnomaga sig'masa, to'liq matn alohida xabarda chiqadi
-    if (needsLongForm) {
-      const optionsText = q.options
-        .map((o, i) => `<b>${optionLabel(i)})</b>  ${escapeHtml(o.text)}`)
-        .join('\n\n');
-      await this.bot.api
-        .sendMessage(
-          chatId,
-          [
-            `<b>[${r.index + 1}/${r.questions.length}]-savol</b>`,
-            '',
-            `<b>${escapeHtml(q.text)}</b>`,
-            '',
-            optionsText,
-            '',
-            `\u{1F447} Javobni quyidagi soʻrovnomada belgilang · ⏱ ${r.timePerQuestion} s`,
-          ].join('\n'),
-          { parse_mode: 'HTML' },
-        )
-        .catch((err) => logger.debug('Uzun savol matni yuborilmadi', err));
-    }
-
-    const explanation = buildExplanation(q);
-
     try {
-      const msg = await this.bot.api.sendPoll(
-        chatId,
-        truncate(fullQuestion, POLL_QUESTION_MAX, true),
-        labeled.map((text) => ({ text })),
-        {
-          type: 'quiz',
-          correct_option_ids: [q.correctIndex],
-          is_anonymous: false, // poll_answer yangilanishlari faqat shunda keladi
-          allows_revoting: false, // javobni o'zgartirib bo'lmaydi
-          open_period: r.timePerQuestion, // Telegram jonli sanoqni o'zi ko'rsatadi
-          explanation,
-          explanation_parse_mode: 'HTML',
-        },
-      );
+      const msg = await this.postQuestion(chatId, r, r.index);
       r.pollMessageId = msg.message_id;
       r.questionStartedAt = Date.now();
       if (msg.poll) {
@@ -375,23 +384,217 @@ export class RaceEngine {
     r.timer = setTimeout(() => void this.closeQuestion(chatId), (r.timePerQuestion + 1) * 1000);
   }
 
+  /**
+   * Bitta savolni quiz so'rovnomasi qilib yuborish (ikkala rejim uchun).
+   * Vaqtli rejimda open_period — Telegram jonli sanoqni o'zi ko'rsatadi;
+   * vaqtsiz rejimda so'rovnoma admin yakunlaguncha ochiq turadi.
+   */
+  private async postQuestion(chatId: number, r: RaceRuntime, index: number) {
+    const q = r.questions[index]!;
+    const total = r.questions.length;
+
+    // So'rovnoma savoli: raqam alohida qatorda, matn ostida — o'qishga qulay.
+    // Eslatma: Telegram so'rovnoma savoli va variantlarida qalin shrift ishlamaydi
+    // (faqat custom emoji), shuning uchun tuzilma bo'sh qator va harflar bilan beriladi.
+    const header = `[${index + 1}/${total}]-savol`;
+    const fullQuestion = `${header}\n\n${q.text}`;
+    // Harf qalin (Unicode), matn oddiy — kirill matnlar ham buzilmaydi.
+    // Harf, qavs va ikki bo'shliq uchun 5 belgi zaxira qoldiriladi.
+    const labeled = q.options.map(
+      (o, i) => `${boldOptionLabel(i)})  ${truncate(o.text, POLL_OPTION_MAX - 5)}`,
+    );
+
+    const needsLongForm =
+      fullQuestion.length > POLL_QUESTION_MAX || labeled.some((o) => o.length > POLL_OPTION_MAX);
+
+    // Uzun savol/variantlar so'rovnomaga sig'masa, to'liq matn alohida xabarda chiqadi
+    if (needsLongForm) {
+      const optionsText = q.options
+        .map((o, i) => `<b>${optionLabel(i)})</b>  ${escapeHtml(o.text)}`)
+        .join('\n\n');
+      await this.withRetry(() =>
+        this.bot.api.sendMessage(
+          chatId,
+          [
+            `<b>${header}</b>`,
+            '',
+            `<b>${escapeHtml(q.text)}</b>`,
+            '',
+            optionsText,
+            '',
+            `\u{1F447} Javobni quyidagi soʻrovnomada belgilang${r.untimed ? '' : ` · ⏱ ${r.timePerQuestion} s`}`,
+          ].join('\n'),
+          { parse_mode: 'HTML' },
+        ),
+      ).catch((err) => logger.debug('Uzun savol matni yuborilmadi', err));
+    }
+
+    return this.withRetry(() =>
+      this.bot.api.sendPoll(
+        chatId,
+        truncate(fullQuestion, POLL_QUESTION_MAX, true),
+        labeled.map((text) => ({ text })),
+        {
+          type: 'quiz',
+          correct_option_ids: [q.correctIndex],
+          is_anonymous: false, // poll_answer yangilanishlari faqat shunda keladi
+          allows_revoting: false, // javobni o'zgartirib bo'lmaydi
+          ...(r.untimed ? {} : { open_period: r.timePerQuestion }),
+          explanation: buildExplanation(q),
+          explanation_parse_mode: 'HTML',
+        },
+      ),
+    );
+  }
+
+  /**
+   * Telegram cheklovi (429 "Too Many Requests") bo'lsa, aytilgan vaqtcha kutib qayta urinish.
+   * Guruhga ko'p so'rovnoma ketma-ket yuborilganda kerak bo'ladi.
+   */
+  private async withRetry<T>(fn: () => Promise<T>, attempts = 6): Promise<T> {
+    for (let i = 0; ; i++) {
+      try {
+        return await fn();
+      } catch (err) {
+        const retryAfter = err instanceof GrammyError ? err.parameters?.retry_after : undefined;
+        if (retryAfter === undefined || i >= attempts - 1) throw err;
+        logger.debug(`Telegram cheklovi: ${retryAfter} s kutilmoqda`);
+        await sleep((retryAfter + 1) * 1000);
+      }
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Vaqtsiz rejim: hamma savol birdaniga, admin yakunlaydi            */
+  /* ---------------------------------------------------------------- */
+
+  private async sendAllPolls(chatId: number) {
+    const r = this.runtimes.get(chatId);
+    if (!r) return;
+
+    for (let i = r.sentCount; i < r.questions.length; i++) {
+      if (r.stopping || r.status !== 'running') return;
+      try {
+        const msg = await this.postQuestion(chatId, r, i);
+        const q = r.questions[i]!;
+        q.pollMessageId = msg.message_id;
+        if (msg.poll) {
+          q.pollId = msg.poll.id;
+          this.polls.set(msg.poll.id, { chatId, index: i });
+        }
+        r.sentCount = i + 1;
+      } catch (err) {
+        logger.error(`Vaqtsiz test: ${i + 1}-savol yuborilmadi`, err);
+        break;
+      }
+      await this.persist(r);
+      if (i < r.questions.length - 1) await sleep(UNTIMED_SEND_PAUSE_MS);
+    }
+    if (r.stopping || r.status !== 'running') return;
+
+    // Yuborilmay qolganlari (xato) natijaga kirmaydi
+    if (r.sentCount === 0) {
+      await this.bot.api.sendMessage(chatId, '❌ Savollarni yuborib boʻlmadi. Botga soʻrovnoma yuborish huquqini bering.').catch(() => undefined);
+      await this.finish(chatId);
+      return;
+    }
+    await this.sendUntimedControls(chatId, r);
+  }
+
+  /** "Yakunlash" tugmali xabar */
+  private async sendUntimedControls(chatId: number, r: RaceRuntime) {
+    const skipped = r.questions.length - r.sentCount;
+    const msg = await this.withRetry(() =>
+      this.bot.api.sendMessage(
+        chatId,
+        [
+          `✅ <b>${r.sentCount} ta savol yuborildi</b>`,
+          skipped > 0 ? `⚠️ ${skipped} ta savol yuborilmadi (Telegram xatosi)` : '',
+          '',
+          `⏳ Javob berish ochiq — vaqt chegarasi yoʻq.`,
+          `\u{1F3C1} Admin <b>Yakunlash</b>ni bosganda soʻrovnomalar yopiladi va natijalar eʼlon qilinadi.`,
+        ]
+          .filter((l, i, arr) => l !== '' || arr[i - 1] !== '')
+          .join('\n'),
+        { parse_mode: 'HTML', reply_markup: untimedControlKeyboard(r.raceId) },
+      ),
+    ).catch((err) => {
+      logger.error('Yakunlash tugmasi yuborilmadi', err);
+      return null;
+    });
+    r.controlMessageId = msg?.message_id;
+    await Race.updateOne({ _id: r.raceId }, { $set: { controlMessageId: r.controlMessageId } });
+  }
+
+  /** Admin "Yakunlash"ni bosdi: so'rovnomalarni yopib, natijalarni e'lon qilish */
+  async finishUntimed(
+    chatId: number,
+    userId: number,
+    raceId?: string,
+  ): Promise<{ ok: boolean; message: string }> {
+    const r = this.runtimes.get(chatId);
+    if (!r || !r.untimed || (raceId && r.raceId !== raceId)) {
+      return { ok: false, message: 'Bu test endi faol emas.' };
+    }
+    if (r.status !== 'running') return { ok: false, message: 'Test hali boshlanmagan.' };
+    if (!(await this.isChatAdmin(chatId, userId))) return { ok: false, message: t.adminOnly };
+
+    // Yangi javoblarni qabul qilmaymiz, yuborish davom etayotgan bo'lsa to'xtaydi
+    r.stopping = true;
+    if (r.persistTimer) clearTimeout(r.persistTimer);
+    if (r.controlMessageId) {
+      await this.safeEdit(chatId, r.controlMessageId, '\u{1F3C1} <b>Test yakunlandi</b> — natijalar hisoblanmoqda…', {
+        parse_mode: 'HTML',
+      });
+    }
+    await this.stopUntimedPolls(chatId, r);
+
+    // Yuborilmagan savollar natijaga kirmaydi
+    r.questions = r.questions.slice(0, r.sentCount);
+    const total = r.questions.length;
+    for (const p of r.participants.values()) p.missed = Math.max(0, total - p.answered);
+
+    void this.finish(chatId);
+    return { ok: true, message: 'Yakunlandi — natijalar eʼlon qilinmoqda' };
+  }
+
+  private async stopUntimedPolls(chatId: number, r: RaceRuntime) {
+    for (const q of r.questions) {
+      if (q.pollId) this.polls.delete(q.pollId);
+      if (!q.pollMessageId) continue;
+      await this.withRetry(() => this.bot.api.stopPoll(chatId, q.pollMessageId!)).catch(() => undefined);
+    }
+  }
+
+  /** Vaqtsiz rejimda javoblar ko'p bo'lishi mumkin — bazaga yig'ib yozamiz */
+  private schedulePersist(r: RaceRuntime) {
+    if (r.persistTimer) return;
+    r.persistTimer = setTimeout(() => {
+      r.persistTimer = undefined;
+      void this.persist(r);
+    }, UNTIMED_PERSIST_DELAY_MS);
+  }
+
   /** poll_answer yangilanishi */
   async handlePollAnswer(answer: PollAnswer): Promise<void> {
     const loc = this.polls.get(answer.poll_id);
     if (!loc) return;
     const r = this.runtimes.get(loc.chatId);
-    if (!r || r.status !== 'running' || r.index !== loc.index) return;
+    if (!r || r.status !== 'running' || r.stopping) return;
+    // Vaqtli rejimda faqat hozirgi savolga; vaqtsizda istalgan ochiq savolga
+    if (!r.untimed && r.index !== loc.index) return;
 
     const user = answer.user;
     if (!user || user.is_bot) return;
     const optionIndex = answer.option_ids[0];
     if (optionIndex === undefined) return; // ovoz qaytarib olindi (quizda bo'lmaydi)
-    if (r.answeredThisQuestion.has(user.id)) return;
+    const answered = r.untimed ? r.answeredBy[loc.index] : r.answeredThisQuestion;
+    if (!answered || answered.has(user.id)) return;
 
-    const q = r.questions[r.index];
+    const q = r.questions[loc.index];
     if (!q) return;
 
-    r.answeredThisQuestion.add(user.id);
+    answered.add(user.id);
 
     let participant = r.participants.get(user.id);
     if (!participant) {
@@ -410,7 +613,8 @@ export class RaceEngine {
       r.participants.set(user.id, participant);
     }
 
-    const elapsedMs = Date.now() - r.questionStartedAt;
+    // Vaqtsiz rejimda tezlik hisoblanmaydi
+    const elapsedMs = r.untimed ? 0 : Date.now() - r.questionStartedAt;
     const correct = optionIndex === q.correctIndex;
     participant.score += computeScore({
       correct,
@@ -428,6 +632,7 @@ export class RaceEngine {
     if (optionIndex >= 0 && optionIndex < q.optionCounts.length) {
       q.optionCounts[optionIndex] = (q.optionCounts[optionIndex] ?? 0) + 1;
     }
+    if (r.untimed) this.schedulePersist(r);
   }
 
   /** Vaqt tugadi: javob bermaganlarni belgilab, keyingi savolga o'tamiz */
@@ -464,6 +669,7 @@ export class RaceEngine {
     if (!r) return;
     r.status = 'finished';
     if (r.timer) clearTimeout(r.timer);
+    if (r.persistTimer) clearTimeout(r.persistTimer);
     if (r.pollId) this.polls.delete(r.pollId);
 
     const ranked = assignPlaces(
@@ -546,8 +752,10 @@ export class RaceEngine {
     const table = ranked
       .slice(0, 15)
       .map((p) => {
+        const line = `${medal(p.place)} ${escapeHtml(p.firstName)} — <b>${p.score}</b> ball · ✅ ${p.correct}/${total}`;
+        if (r.untimed) return line;
         const avg = p.answered > 0 ? `${(p.totalTimeMs / p.answered / 1000).toFixed(1)}s` : '—';
-        return `${medal(p.place)} ${escapeHtml(p.firstName)} — <b>${p.score}</b> ball · ✅ ${p.correct}/${total} · ⚡ ${avg}`;
+        return `${line} · ⚡ ${avg}`;
       })
       .join('\n');
 
@@ -628,7 +836,7 @@ export class RaceEngine {
     chatId: number,
     userId: number,
     raceId?: string,
-  ): Promise<{ ok: boolean; message: string; wasRunning?: boolean; asked?: number }> {
+  ): Promise<{ ok: boolean; message: string; wasRunning?: boolean; asked?: number; untimed?: boolean }> {
     const r = this.runtimes.get(chatId);
     if (!r || (raceId && r.raceId !== raceId)) {
       return { ok: false, message: 'Faol musobaqa yoʻq.' };
@@ -638,9 +846,15 @@ export class RaceEngine {
     }
     r.stopping = true;
     if (r.timer) clearTimeout(r.timer);
+    if (r.persistTimer) clearTimeout(r.persistTimer);
     if (r.pollId) this.polls.delete(r.pollId);
     // Ochiq turgan so'rovnomani yopamiz — javob berib bo'lmasligi aniq ko'rinsin
-    if (r.status === 'running' && r.pollMessageId) {
+    if (r.status === 'running' && r.untimed) {
+      await this.stopUntimedPolls(chatId, r);
+      if (r.controlMessageId) {
+        await this.safeEdit(chatId, r.controlMessageId, '⏹ Test toʻxtatildi — natijalar hisoblanmadi.');
+      }
+    } else if (r.status === 'running' && r.pollMessageId) {
       try {
         await this.bot.api.stopPoll(chatId, r.pollMessageId);
       } catch {
@@ -653,8 +867,87 @@ export class RaceEngine {
       ok: true,
       message: 'Toʻxtatildi.',
       wasRunning: r.status === 'running',
-      asked: r.index,
+      asked: r.untimed ? r.sentCount : r.index,
+      untimed: r.untimed,
     };
+  }
+
+  /**
+   * Bot qayta ishga tushganda ochiq turgan vaqtsiz testlarni tiklash.
+   * Ular soatlab/kunlab ochiq turishi mumkin — deploy natijalarni yo'qotmasligi kerak.
+   * (Oxirgi ~2 soniyadagi javoblar bazaga yozilmay qolgan bo'lishi mumkin.)
+   */
+  async restoreUntimed(): Promise<number> {
+    const docs = await Race.find({ status: 'running', untimed: true });
+    let restored = 0;
+    for (const doc of docs) {
+      if (this.runtimes.has(doc.chatId)) continue;
+      const questions: RaceQuestionRuntime[] = doc.questions
+        .filter((q) => q.pollId)
+        .map((q) => ({
+          text: q.text,
+          options: q.options.map((o) => ({ text: o.text })),
+          correctIndex: q.correctIndex,
+          explanation: q.explanation ?? undefined,
+          answeredCount: q.answeredCount,
+          correctCount: q.correctCount,
+          optionCounts: [...q.optionCounts],
+          pollId: q.pollId ?? undefined,
+          pollMessageId: q.pollMessageId ?? undefined,
+        }));
+      if (questions.length === 0) {
+        await Race.updateOne({ _id: doc._id }, { $set: { status: 'cancelled' } });
+        continue;
+      }
+
+      const runtime: RaceRuntime = {
+        raceId: String(doc._id),
+        chatId: doc.chatId,
+        chatTitle: doc.chatTitle,
+        hostId: doc.hostId,
+        ownerId: doc.ownerId,
+        templateId: String(doc.templateId),
+        title: doc.templateTitle,
+        questions,
+        timePerQuestion: doc.timePerQuestion,
+        speedBonus: false,
+        index: 0,
+        status: 'running',
+        participants: new Map(
+          doc.participants.map((p) => [
+            p.userId,
+            {
+              userId: p.userId,
+              firstName: p.firstName,
+              username: p.username,
+              score: p.score,
+              correct: p.correct,
+              wrong: p.wrong,
+              missed: p.missed,
+              totalTimeMs: p.totalTimeMs,
+              answered: p.answered,
+              joinedAt: 0,
+            },
+          ]),
+        ),
+        answeredThisQuestion: new Set(),
+        questionStartedAt: 0,
+        stopping: false,
+        untimed: true,
+        // Telegram quiz'da qayta ovoz berib bo'lmaydi, shuning uchun bo'sh to'plam xavfsiz
+        answeredBy: questions.map(() => new Set<number>()),
+        sentCount: questions.length,
+        controlMessageId: doc.controlMessageId ?? undefined,
+      };
+      this.runtimes.set(doc.chatId, runtime);
+      questions.forEach((q, index) => {
+        if (q.pollId) this.polls.set(q.pollId, { chatId: doc.chatId, index });
+      });
+      // Yuborish yarim qolgan bo'lsa — yakunlash tugmasi hali chiqmagan
+      if (!runtime.controlMessageId) await this.sendUntimedControls(doc.chatId, runtime);
+      restored++;
+    }
+    return restored;
   }
 
 
@@ -714,10 +1007,18 @@ export class RaceEngine {
     }
   }
 
-  /** Bot qayta ishga tushganda yarim qolgan musobaqalarni yopish */
+  /**
+   * Bot qayta ishga tushganda yarim qolgan musobaqalarni yopish.
+   * Ketayotgan vaqtsiz testlar tegilmaydi — ular restoreUntimed() bilan tiklanadi.
+   */
   static async cleanupStale(): Promise<number> {
     const res = await Race.updateMany(
-      { status: { $in: ['waiting', 'running'] } },
+      {
+        $or: [
+          { status: 'waiting' },
+          { status: 'running', untimed: { $ne: true } },
+        ],
+      },
       { $set: { status: 'cancelled' } },
     );
     return res.modifiedCount ?? 0;

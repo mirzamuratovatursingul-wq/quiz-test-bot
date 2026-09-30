@@ -5,34 +5,60 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { cleanQuestion, isQuestionReady, MAX_OPTIONS } from '@/lib/questions';
+import { cleanQuestion, isQuestionReady, MAX_OPTIONS, newQuestionProblem } from '@/lib/questions';
 import { cn } from '@/lib/utils';
-import { selectionTap, tap } from '@/telegram';
+import { haptic, selectionTap, tap } from '@/telegram';
 
 /**
  * Bitta savolni ko'rsatish va tahrirlash.
  * Ko'rish rejimida variantni bosish = to'g'ri javobni belgilash.
  * ✏️ tugmasi — savol va variantlar matnini tahrirlash rejimi.
+ *
+ * `isNew` — ro'yxat oxiriga qo'shilgan yangi savol: darhol tahrirlash rejimida ochiladi,
+ * matn, 2 ta variant va to'g'ri javob bo'lmaguncha "Tayyor" yopmaydi;
+ * "Bekor qilish" (yoki bo'sh holda "Tayyor") savolni olib tashlaydi.
  */
 export function QuestionEditor({
   index,
   question,
   onChange,
   onDelete,
+  isNew = false,
+  onCreated,
+  onDiscard,
 }: {
   index: number;
   question: Question;
   onChange: (q: Question) => void;
   onDelete?: () => void;
+  isNew?: boolean;
+  onCreated?: () => void;
+  onDiscard?: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(isNew);
   const [editingNote, setEditingNote] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
   const needsAnswer = !isQuestionReady(question);
 
   function finishEditing() {
+    const cleaned = cleanQuestion(question);
+    if (isNew) {
+      if (!cleaned.text && cleaned.options.length === 0) {
+        onDiscard?.();
+        return;
+      }
+      const missing = newQuestionProblem(cleaned);
+      if (missing) {
+        haptic('error');
+        setProblem(missing);
+        return;
+      }
+    }
     tap();
-    onChange(cleanQuestion(question));
+    setProblem(null);
+    onChange(cleaned);
     setEditing(false);
+    if (isNew) onCreated?.();
   }
 
   return (
@@ -47,6 +73,7 @@ export function QuestionEditor({
         <span className="rounded-full bg-background px-2 py-0.5 text-[12px] font-bold tabular-nums text-muted-foreground">
           {index + 1}-savol
         </span>
+        {isNew && editing && <Badge>yangi</Badge>}
         {needsAnswer && !editing && <Badge variant="warning">javobni belgilang</Badge>}
         <div className="ml-auto flex items-center">
           {!editing && (
@@ -61,7 +88,7 @@ export function QuestionEditor({
               <Pencil className="size-4" />
             </button>
           )}
-          {onDelete && (
+          {onDelete && !(isNew && editing) && (
             <button
               onClick={onDelete}
               className="flex size-8 items-center justify-center rounded-full text-muted-foreground active:bg-muted"
@@ -74,7 +101,17 @@ export function QuestionEditor({
       </div>
 
       {editing ? (
-        <EditForm question={question} onChange={onChange} onDone={finishEditing} />
+        <EditForm
+          question={question}
+          onChange={(q) => {
+            setProblem(null);
+            onChange(q);
+          }}
+          onDone={finishEditing}
+          onCancel={isNew ? onDiscard : undefined}
+          problem={problem}
+          doneLabel={isNew ? 'Savolni qo‘shish' : 'Tayyor'}
+        />
       ) : (
         <>
           <p
@@ -164,15 +201,33 @@ export function QuestionEditor({
   );
 }
 
+/** Ro'yxat oxiridagi "Yangi savol qo'shish" tugmasi */
+export function AddQuestionButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-card px-3 py-3.5 text-[15px] font-semibold text-primary active:scale-[.99]"
+    >
+      <Plus className="size-4" /> Yangi savol qo‘shish
+    </button>
+  );
+}
+
 /** Savol va variantlar matnini tahrirlash */
 function EditForm({
   question,
   onChange,
   onDone,
+  onCancel,
+  problem,
+  doneLabel,
 }: {
   question: Question;
   onChange: (q: Question) => void;
   onDone: () => void;
+  onCancel?: () => void;
+  problem?: string | null;
+  doneLabel: string;
 }) {
   function setOption(i: number, text: string) {
     onChange({
@@ -243,18 +298,35 @@ function EditForm({
         })}
       </div>
 
-      <p className="text-[12.5px] text-muted-foreground">
-        Harfni bosib to‘g‘ri javobni belgilang. Bo‘sh variantlar saqlanmaydi.
-      </p>
+      {problem ? (
+        <p className="text-[12.5px] font-semibold text-destructive">⚠️ {problem}</p>
+      ) : (
+        <p className="text-[12.5px] text-muted-foreground">
+          Harfni bosib to‘g‘ri javobni belgilang. Bo‘sh variantlar saqlanmaydi.
+        </p>
+      )}
 
+      {question.options.length < MAX_OPTIONS && (
+        <Button variant="secondary" size="sm" className="w-full" onClick={addOption}>
+          <Plus /> Variant qo‘shish
+        </Button>
+      )}
       <div className="flex gap-2">
-        {question.options.length < MAX_OPTIONS && (
-          <Button variant="secondary" size="sm" className="flex-1" onClick={addOption}>
-            <Plus /> Variant qo‘shish
+        {onCancel && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex-1"
+            onClick={() => {
+              tap();
+              onCancel();
+            }}
+          >
+            <X /> Bekor qilish
           </Button>
         )}
         <Button size="sm" className="flex-1" onClick={onDone}>
-          <Check /> Tayyor
+          <Check /> {doneLabel}
         </Button>
       </div>
     </div>

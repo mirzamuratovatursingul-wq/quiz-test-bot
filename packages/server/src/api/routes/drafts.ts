@@ -1,16 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import {
-  applyAnswerKeyText,
-  applyFirstIsCorrect,
-  parseTestText,
-  type DraftDTO,
-  type Question,
-} from '@testrace/shared';
+import { applyAnswerKeyText, applyFirstIsCorrect, type DraftDTO, type Question } from '@testrace/shared';
 import { Draft, Template, User } from '../../db/models.js';
-import { ExtractError, extractText } from '../../services/extract.service.js';
+import { ExtractError } from '../../services/extract.service.js';
+import { importTestFile, importTestText } from '../../services/test-import.service.js';
 import { currentUser, requireAuth } from '../auth.js';
-import { toTemplateDTO } from './templates.js';
+import { timePerQuestionSchema, toTemplateDTO } from './templates.js';
 import { logger } from '../../logger.js';
 import { config } from '../../config.js';
 
@@ -72,7 +67,7 @@ export async function draftRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'bad_request', message: 'Matn juda qisqa yoki katta' });
     }
 
-    const result = parseTestText(body.data.text);
+    const { result } = await importTestText(body.data.text);
     if (result.questions.length === 0) {
       return reply.code(422).send({
         error: 'no_questions',
@@ -104,8 +99,8 @@ export async function draftRoutes(app: FastifyInstance) {
 
     try {
       const buffer = await file.toBuffer();
-      const extracted = await extractText(buffer, file.filename, file.mimetype);
-      const result = parseTestText(extracted.text);
+      const extracted = await importTestFile(buffer, file.filename, file.mimetype);
+      const { result } = extracted;
 
       if (result.questions.length === 0) {
         return reply.code(422).send({
@@ -178,7 +173,7 @@ export async function draftRoutes(app: FastifyInstance) {
         description: z.string().max(500).optional(),
         settings: z
           .object({
-            timePerQuestion: z.number().int().min(5).max(120).optional(),
+            timePerQuestion: timePerQuestionSchema.optional(),
             shuffleQuestions: z.boolean().optional(),
             shuffleOptions: z.boolean().optional(),
             questionLimit: z.number().int().min(0).max(500).optional(),

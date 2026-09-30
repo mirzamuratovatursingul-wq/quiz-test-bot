@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "check:parser": "tsx src/scripts/check-parser.ts",
     "check:output": "tsx src/scripts/check-output.ts",
+    "check:formats": "tsx src/scripts/check-formats.ts",
     "smoke": "tsx src/scripts/smoke-api.ts",
     "smoke:race": "tsx src/scripts/smoke-race.ts",
     "preview:ui": "tsx src/scripts/preview-ui.ts",

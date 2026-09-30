@@ -112,8 +112,13 @@ export function templatesListKeyboard(
 }
 
 /** Guruhdagi musobaqa kartochkasi */
-export function raceIntroKeyboard(raceId: string): InlineKeyboard {
+export function raceIntroKeyboard(raceId: string, untimed = false): InlineKeyboard {
   return new InlineKeyboard()
-    .text('▶️ Boshlash', `race:start:${raceId}`)
+    .text(untimed ? '▶️ Savollarni yuborish' : '▶️ Boshlash', `race:start:${raceId}`)
     .text('✕ Bekor qilish', `race:cancel:${raceId}`);
+}
+
+/** Vaqtsiz test: savollar ochiq turibdi, admin yakunlaydi */
+export function untimedControlKeyboard(raceId: string): InlineKeyboard {
+  return new InlineKeyboard().text('\u{1F3C1} Yakunlash va natijalar', `race:finish:${raceId}`);
 }

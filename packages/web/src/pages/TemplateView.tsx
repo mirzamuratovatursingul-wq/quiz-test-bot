@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ChevronRight, Copy, FileDown, Send, Settings2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Question, RaceDTO, TemplateDTO } from '@testrace/shared';
+import { isUntimed, type Question, type RaceDTO, type TemplateDTO } from '@testrace/shared';
 import { api, ApiError } from '@/api';
 import { ErrorNote, IconTile, LoadingList, Page, PageHeader, SectionTitle, StickyAction } from '@/components/app';
-import { QuestionEditor } from '@/components/question-editor';
+import { AddQuestionButton, QuestionEditor } from '@/components/question-editor';
 import { SettingsForm } from '@/components/settings-form';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,7 +18,7 @@ import {
   useTelegramMainButton,
   useUnsavedChanges,
 } from '@/hooks';
-import { cleanQuestion, isQuestionReady } from '@/lib/questions';
+import { cleanQuestion, emptyQuestion, isQuestionReady, newQuestionKey } from '@/lib/questions';
 import { confirmMsg, hasNativeButtons, haptic, openTelegramLink, tap } from '@/telegram';
 
 const PDF_MODES = [
@@ -38,6 +38,10 @@ export default function TemplateView() {
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Savollarning barqaror kalitlari (questions bilan bir xil tartibda) */
+  const [keys, setKeys] = useState<number[]>([]);
+  /** Hozir to'ldirilayotgan yangi savol indeksi */
+  const [newIndex, setNewIndex] = useState<number | null>(null);
 
   const list = useInfiniteList(template?.questions ?? [], 10);
 
@@ -53,6 +57,8 @@ export default function TemplateView() {
     try {
       const [t, r, me] = await Promise.all([api.template(id), api.races(id), api.me()]);
       setTemplate(t.template);
+      setKeys(t.template.questions.map(newQuestionKey));
+      setNewIndex(null);
       setRaces(r.races);
       setBotUsername(me.botUsername);
     } catch (err) {
@@ -78,6 +84,13 @@ export default function TemplateView() {
     setDirty(true);
   }
 
+  function dropQuestion(index: number) {
+    setTemplate((prev) => (prev ? { ...prev, questions: prev.questions.filter((_, i) => i !== index) } : prev));
+    setKeys((prev) => prev.filter((_, i) => i !== index));
+    setNewIndex((prev) => (prev === null || prev === index ? null : prev > index ? prev - 1 : prev));
+    setDirty(true);
+  }
+
   async function removeQuestion(index: number) {
     if (!template) return;
     if (template.questions.length <= 1) {
@@ -85,11 +98,31 @@ export default function TemplateView() {
       return;
     }
     if (!(await confirmMsg(`${index + 1}-savol o‘chirilsinmi?`))) return;
-    patch({ questions: template.questions.filter((_, i) => i !== index) });
+    dropQuestion(index);
+  }
+
+  function addQuestion() {
+    if (!template) return;
+    if (newIndex !== null) {
+      haptic('error');
+      toast.error('Avval yangi savolni to‘ldirib, “Savolni qo‘shish”ni bosing');
+      return;
+    }
+    tap();
+    setNewIndex(template.questions.length);
+    setTemplate((prev) => (prev ? { ...prev, questions: [...prev.questions, emptyQuestion()] } : prev));
+    setKeys((prev) => [...prev, newQuestionKey()]);
+    setDirty(true);
+    list.showAll();
   }
 
   async function save() {
     if (!template) return;
+    if (newIndex !== null) {
+      haptic('error');
+      toast.error('Yangi savolni tugating yoki bekor qiling');
+      return;
+    }
     const questions = template.questions.map(cleanQuestion);
     const broken = questions.findIndex((q) => !q.text || !isQuestionReady(q));
     if (broken >= 0) {
@@ -196,6 +229,7 @@ export default function TemplateView() {
     );
 
   const s = template.settings;
+  const untimed = isUntimed(s.timePerQuestion);
   const perRace = s.questionLimit > 0 && s.questionLimit < template.questions.length ? s.questionLimit : template.questions.length;
 
   return (
@@ -244,13 +278,18 @@ export default function TemplateView() {
       <div className="rounded-2xl border border-border bg-card p-4">
         <div className="grid grid-cols-3 gap-2 text-center">
           <Metric value={perRace} label={perRace === template.questions.length ? 'savol' : `savol (${template.questions.length} dan)`} />
-          <Metric value={`${s.timePerQuestion}s`} label="savolga" />
+          {untimed ? (
+            <Metric value="∞" label="vaqtsiz" />
+          ) : (
+            <Metric value={`${s.timePerQuestion}s`} label="savolga" />
+          )}
           <Metric value={template.racesCount} label="musobaqa" />
         </div>
         <div className="mt-3 flex flex-wrap justify-center gap-1.5 text-[12px] text-muted-foreground">
+          {untimed && <Tag>📝 oddiy so‘rovnoma</Tag>}
           {s.shuffleQuestions && <Tag>🔀 aralash savollar</Tag>}
           {s.shuffleOptions && <Tag>🔁 aralash variantlar</Tag>}
-          {s.speedBonus && <Tag>⚡ tezlik bonusi</Tag>}
+          {s.speedBonus && !untimed && <Tag>⚡ tezlik bonusi</Tag>}
         </div>
 
         {!hasNativeButtons && (
@@ -259,8 +298,10 @@ export default function TemplateView() {
           </Button>
         )}
         <p className="mt-3 text-center text-[12.5px] leading-relaxed text-muted-foreground">
-          {hasNativeButtons ? 'Pastdagi tugma → ' : ''}Guruhni tanlaysiz → u yerda “Boshlash” chiqadi.
-          Musobaqani faqat guruh admini boshlaydi.
+          {hasNativeButtons ? 'Pastdagi tugma → ' : ''}Guruhni tanlaysiz → u yerda{' '}
+          {untimed
+            ? '“Savollarni yuborish” chiqadi. Hamma savol birdaniga ketadi, natijani admin yakunlaydi.'
+            : '“Boshlash” chiqadi. Musobaqani faqat guruh admini boshlaydi.'}
         </p>
       </div>
 
@@ -333,28 +374,33 @@ export default function TemplateView() {
         </>
       )}
 
-      <SectionTitle hint={`Variantni bosib javobni almashtirasiz · ✏️ — matnni tuzatish`}>
+      <SectionTitle hint={`Variantni bosib javobni almashtirasiz · ✏️ — tahrirlash · 🗑 — o‘chirish`}>
         ❓ Savollar · {template.questions.length}
       </SectionTitle>
       <div className="space-y-2.5">
         {list.visible.map((q, i) => (
           <QuestionEditor
-            key={i}
+            key={keys[i] ?? `i${i}`}
             index={i}
             question={q}
             onChange={(next) => patchQuestion(i, next)}
             onDelete={() => void removeQuestion(i)}
+            isNew={i === newIndex}
+            onCreated={() => setNewIndex(null)}
+            onDiscard={() => dropQuestion(i)}
           />
         ))}
       </div>
 
-      {list.hasMore && (
+      {list.hasMore ? (
         <div ref={list.sentinelRef} className="space-y-2.5 pt-2.5">
           <Skeleton className="h-28 w-full rounded-xl" />
           <p className="text-center text-[12.5px] text-muted-foreground">
             {list.shown}/{list.total} ta savol yuklandi…
           </p>
         </div>
+      ) : (
+        newIndex === null && <AddQuestionButton onClick={addQuestion} />
       )}
 
       {dirty && (

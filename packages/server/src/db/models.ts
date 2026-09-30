@@ -143,6 +143,10 @@ const raceQuestionSchema = new Schema(
     answeredCount: { type: Number, default: 0 },
     correctCount: { type: Number, default: 0 },
     optionCounts: { type: [Number], default: [] },
+    explanation: { type: String },
+    /** Vaqtsiz rejim: so'rovnoma bot qayta ishga tushgandan keyin ham tanilishi uchun */
+    pollId: { type: String },
+    pollMessageId: { type: Number },
   },
   { _id: false },
 );
@@ -165,6 +169,10 @@ const raceSchema = new Schema(
     currentIndex: { type: Number, default: 0 },
     timePerQuestion: { type: Number, default: 15 },
     speedBonus: { type: Boolean, default: true },
+    /** Vaqtsiz rejim (timePerQuestion = 0): hamma savol birdaniga, admin yakunlaydi */
+    untimed: { type: Boolean, default: false },
+    /** Vaqtsiz rejimdagi "Yakunlash" tugmali xabar */
+    controlMessageId: { type: Number },
     startedAt: { type: Date },
     finishedAt: { type: Date },
   },

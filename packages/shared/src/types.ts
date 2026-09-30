@@ -35,7 +35,7 @@ export interface ParseResult {
   questions: Question[];
   warnings: ParseWarning[];
   /** Qaysi strategiya ishladi */
-  strategy: 'plus' | 'answer_key' | 'first_is_correct' | 'mixed' | 'none';
+  strategy: 'plus' | 'answer_key' | 'first_is_correct' | 'mixed' | 'ai' | 'none';
   stats: {
     total: number;
     withCorrect: number;
@@ -46,7 +46,11 @@ export interface ParseResult {
 export type TemplateStatus = 'draft' | 'ready';
 
 export interface TemplateSettings {
-  /** Har bir savolga beriladigan vaqt (sekund) */
+  /**
+   * Har bir savolga beriladigan vaqt (sekund, 5–120).
+   * 0 — vaqtsiz: savollar guruhga oddiy so'rovnoma bo'lib birdaniga yuboriladi,
+   * natijani admin "Yakunlash" tugmasi bilan e'lon qiladi.
+   */
   timePerQuestion: number;
   /** Savollarni aralashtirish */
   shuffleQuestions: boolean;
@@ -65,6 +69,20 @@ export const DEFAULT_TEMPLATE_SETTINGS: TemplateSettings = {
   questionLimit: 0,
   speedBonus: true,
 };
+
+/** Savolga vaqt chegarasi: 0 = vaqtsiz rejim */
+export const UNTIMED = 0;
+export const MIN_TIME_PER_QUESTION = 5;
+export const MAX_TIME_PER_QUESTION = 120;
+
+export function isUntimed(timePerQuestion: number | undefined | null): boolean {
+  return timePerQuestion === UNTIMED;
+}
+
+/** "15 s" yoki "vaqtsiz" */
+export function formatTimeLimit(timePerQuestion: number | undefined | null): string {
+  return isUntimed(timePerQuestion) ? 'vaqtsiz' : `${timePerQuestion ?? DEFAULT_TEMPLATE_SETTINGS.timePerQuestion} s`;
+}
 
 export interface TemplateDTO {
   id: string;

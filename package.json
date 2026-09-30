@@ -16,7 +16,7 @@
     "fonts": "node scripts/fetch-fonts.mjs",
     "tunnel": "node scripts/tunnel.mjs",
     "typecheck": "tsc -b packages/shared packages/server && npm run typecheck -w @testrace/web",
-    "test": "npm run smoke -w @testrace/server && npm run smoke:race -w @testrace/server",
+    "test": "npm run build -w @testrace/shared && npm run check:formats -w @testrace/server && npm run smoke -w @testrace/server && npm run smoke:race -w @testrace/server",
     "smoke": "npm run smoke -w @testrace/server",
     "smoke:race": "npm run smoke:race -w @testrace/server",
     "clean": "node -e \"const fs=require('fs');for(const d of ['packages/shared/dist','packages/server/dist','packages/web/dist'])fs.rmSync(d,{recursive:true,force:true});\"",

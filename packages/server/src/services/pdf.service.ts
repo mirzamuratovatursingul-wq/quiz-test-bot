@@ -1,7 +1,7 @@
 import PDFDocument from 'pdfkit';
 import fs from 'node:fs';
 import path from 'node:path';
-import { optionLabel, shuffle, type Question } from '@testrace/shared';
+import { isUntimed, optionLabel, shuffle, type Question } from '@testrace/shared';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import type { RaceDoc, TemplateDoc } from '../db/models.js';
@@ -210,7 +210,11 @@ export async function buildRaceReportPdf(race: RaceDoc): Promise<Buffer> {
   doc.font('body').fontSize(10);
   doc.text(`Savollar soni: ${race.questions.length}`);
   doc.text(`Ishtirokchilar: ${participants.length}`);
-  doc.text(`Har bir savolga vaqt: ${race.timePerQuestion} sekund`);
+  doc.text(
+    isUntimed(race.timePerQuestion)
+      ? 'Rejim: vaqtsiz (oddiy soʻrovnoma)'
+      : `Har bir savolga vaqt: ${race.timePerQuestion} sekund`,
+  );
   doc.moveDown(0.8);
 
   // Natijalar jadvali

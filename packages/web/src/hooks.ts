@@ -110,5 +110,7 @@ export function useInfiniteList<T>(items: T[], step = 10) {
     hasMore: count < total,
     sentinelRef,
     loadMore: () => setCount((c) => Math.min(c + step, total)),
+    /** Hammasini ko'rsatish (masalan, oxiriga yangi savol qo'shilganda) */
+    showAll: () => setCount(Number.POSITIVE_INFINITY),
   };
 }

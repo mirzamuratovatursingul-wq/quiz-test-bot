@@ -1,4 +1,5 @@
 import { InlineKeyboard, type Bot } from 'grammy';
+import { isUntimed } from '@testrace/shared';
 import { Group, Race, Template } from '../../db/models.js';
 import { config } from '../../config.js';
 import { escapeHtml } from '../../services/telegram.service.js';
@@ -118,7 +119,7 @@ export function registerGroupHandlers(bot: Bot, engine: RaceEngine) {
     templates.forEach((tpl) => {
       const title = tpl.title.length > 30 ? `${tpl.title.slice(0, 29)}…` : tpl.title;
       kb.text(
-        `\u{1F4D8} ${title} · ${tpl.questions.length} savol`,
+        `\u{1F4D8} ${title} · ${tpl.questions.length} savol${isUntimed(tpl.settings?.timePerQuestion) ? ' · vaqtsiz' : ''}`,
         `race:pick:${String(tpl._id)}:${userId}`,
       ).row();
     });
@@ -195,6 +196,23 @@ export function registerGroupHandlers(bot: Bot, engine: RaceEngine) {
     }
   });
 
+  /* Vaqtsiz test: "Yakunlash va natijalar" tugmasi */
+  bot.callbackQuery(/^race:finish:(.+)$/, async (ctx) => {
+    if (!ctx.chat) return;
+    const res = await engine.finishUntimed(ctx.chat.id, ctx.from.id, ctx.match[1]);
+    await ctx.answerCallbackQuery({ text: res.message, show_alert: !res.ok });
+  });
+
+  /* /yakunlash — vaqtsiz testni yakunlash */
+  bot.command(['yakunlash', 'finish'], async (ctx) => {
+    if (!ctx.chat || !GROUP_TYPES.includes(ctx.chat.type)) {
+      await ctx.reply(t.groupOnly);
+      return;
+    }
+    const res = await engine.finishUntimed(ctx.chat.id, ctx.from?.id ?? 0);
+    if (!res.ok) await ctx.reply(res.message);
+  });
+
   /* Quiz so'rovnomasidagi javoblar */
   bot.on('poll_answer', async (ctx) => {
     await engine.handlePollAnswer(ctx.pollAnswer);
@@ -211,12 +229,12 @@ export function registerGroupHandlers(bot: Bot, engine: RaceEngine) {
       await ctx.reply(res.message);
       return;
     }
-    await ctx.reply(
-      res.wasRunning
-        ? `⏹ <b>Musobaqa toʻxtatildi</b> (${res.asked ?? 0}-savolda).\nNatijalar hisoblanmadi. Yangisi: /boshlash`
-        : '✕ Musobaqa bekor qilindi. Yangisi: /boshlash',
-      { parse_mode: 'HTML' },
-    );
+    const stoppedText = res.untimed
+      ? `⏹ <b>Test toʻxtatildi</b> — ${res.asked ?? 0} ta soʻrovnoma yopildi.\nNatijalar hisoblanmadi. Yangisi: /boshlash`
+      : `⏹ <b>Musobaqa toʻxtatildi</b> (${res.asked ?? 0}-savolda).\nNatijalar hisoblanmadi. Yangisi: /boshlash`;
+    await ctx.reply(res.wasRunning ? stoppedText : '✕ Musobaqa bekor qilindi. Yangisi: /boshlash', {
+      parse_mode: 'HTML',
+    });
   });
 
   /* /holat */
@@ -237,12 +255,18 @@ export function registerGroupHandlers(bot: Bot, engine: RaceEngine) {
     }
     const total = runtime.questions.length;
     const current = Math.min(runtime.index + 1, total);
+    let progress: string;
+    if (runtime.status === 'waiting') progress = '⏳ Boshlanishini kutmoqda';
+    else if (runtime.untimed) {
+      progress =
+        runtime.sentCount < total
+          ? `\u{1F4E8} Yuborilmoqda: ${runtime.sentCount}/${total}`
+          : `\u{1F4DD} Vaqtsiz test · ${total} ta savol ochiq · yakunlash: /yakunlash`;
+    } else progress = `${progressBar(runtime.index, total)} ${current}/${total}-savol`;
     await ctx.reply(
       [
         `\u{1F3C1} <b>${escapeHtml(runtime.title)}</b>`,
-        runtime.status === 'waiting'
-          ? '⏳ Boshlanishini kutmoqda'
-          : `${progressBar(runtime.index, total)} ${current}/${total}-savol`,
+        progress,
         `\u{1F465} Qatnashayotganlar: <b>${runtime.participants.size}</b>`,
       ].join('\n'),
       { parse_mode: 'HTML' },

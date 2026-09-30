@@ -51,6 +51,31 @@ const schema = z.object({
   MAX_FILE_MB: z.coerce.number().default(20),
   /** Mini App initData ning eskirish muddati (sekund) */
   INITDATA_TTL: z.coerce.number().default(86400),
+  /** Google Gemini API kaliti (bepul: https://aistudio.google.com/apikey). Bo'sh bo'lsa AI o'chiq */
+  GEMINI_API_KEY: z
+    .string()
+    .optional()
+    .transform((v) => v?.trim() || undefined),
+  /**
+   * Gemini modeli. Vergul bilan bir nechtasini yozsangiz, birinchisi ishlamasa keyingisi sinaladi.
+   * Hammasi eskirgan bo'lsa, ai.service mavjud "flash" modelni API dan o'zi topadi.
+   */
+  GEMINI_MODEL: z
+    .string()
+    .default('gemini-3.8-flash')
+    .transform((v) =>
+      v
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  /**
+   * AI qachon ishlatilsin:
+   *   auto   — oddiy tahlil natijasi ishonchsiz bo'lsa (tavsiya etiladi)
+   *   always — har bir fayl/matn AI orqali (oddiy tahlil zaxira bo'lib qoladi)
+   *   off    — umuman ishlatilmasin
+   */
+  AI_MODE: z.enum(['auto', 'always', 'off']).default('auto'),
   /** Web build'ni server orqali tarqatish (bitta deploy) */
   SERVE_WEB: z
     .string()
@@ -107,6 +132,23 @@ export function watchEnvFile(onChange?: (changed: Record<string, string>) => voi
           changed.BOT_USERNAME = nextBot;
         }
 
+        // AI sozlamalari ham qayta ishga tushirmasdan yangilanadi (kalit logga chiqmaydi)
+        const nextKey = parsed.GEMINI_API_KEY?.trim() || undefined;
+        if (nextKey !== config.GEMINI_API_KEY) {
+          config.GEMINI_API_KEY = nextKey;
+          changed.GEMINI_API_KEY = nextKey ? '(yangilandi)' : '(oʻchirildi)';
+        }
+        const nextModels = (parsed.GEMINI_MODEL ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+        if (nextModels.length > 0 && nextModels.join(',') !== config.GEMINI_MODEL.join(',')) {
+          config.GEMINI_MODEL = nextModels;
+          changed.GEMINI_MODEL = nextModels.join(',');
+        }
+        const nextMode = parsed.AI_MODE?.trim();
+        if ((nextMode === 'auto' || nextMode === 'always' || nextMode === 'off') && nextMode !== config.AI_MODE) {
+          config.AI_MODE = nextMode;
+          changed.AI_MODE = nextMode;
+        }
+
         if (Object.keys(changed).length > 0) onChange?.(changed);
       } catch {
         /* fayl yozilayotgan payt bo'lishi mumkin — keyingi o'zgarishda o'qiymiz */
@@ -124,6 +166,12 @@ export function warnAboutConfig(): string[] {
       `WEBAPP_URL hali toʻgʻri emas (${config.WEBAPP_URL}). Telegram Mini App faqat HTTPS manzilda ochiladi — ` +
         '"ngrok http 3000" ishga tushiring va olingan manzilni .env dagi WEBAPP_URL ga yozing. ' +
         'Hozircha bot Mini App oʻrniga oddiy havola tugmasini koʻrsatadi.',
+    );
+  }
+  if (!config.GEMINI_API_KEY && config.AI_MODE !== 'off') {
+    warnings.push(
+      'GEMINI_API_KEY koʻrsatilmagan — PDF testlar faqat oddiy tahlilchi bilan oʻqiladi. ' +
+        'Skaner PDF va murakkab formatlar uchun https://aistudio.google.com/apikey dan bepul kalit oling.',
     );
   }
   if (!config.BOT_USERNAME) {

@@ -64,6 +64,11 @@ export async function startBot(): Promise<BotBundle> {
 
   const stale = await RaceEngine.cleanupStale();
   if (stale > 0) logger.info(`${stale} ta tugallanmagan musobaqa yopildi`);
+  const restored = await b.engine.restoreUntimed().catch((err: unknown) => {
+    logger.error('Vaqtsiz testlarni tiklab boʻlmadi', err);
+    return 0;
+  });
+  if (restored > 0) logger.info(`${restored} ta ochiq vaqtsiz test tiklandi`);
 
   // Token to'g'riligini eng avval tekshiramiz — xato bo'lsa tushunarli xabar chiqadi
   const me = await b.bot.api.getMe().catch((err: unknown) => {
@@ -89,6 +94,7 @@ export async function startBot(): Promise<BotBundle> {
     [
       { command: 'boshlash', description: 'Musobaqani boshlash' },
       { command: 'toxtat', description: "Musobaqani toʻxtatish" },
+      { command: 'yakunlash', description: 'Vaqtsiz testni yakunlash va natijalar' },
       { command: 'holat', description: 'Joriy musobaqa holati' },
     ],
     { scope: { type: 'all_group_chats' } },

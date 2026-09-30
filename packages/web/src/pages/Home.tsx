@@ -12,7 +12,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import type { DraftDTO, TemplateDTO } from '@testrace/shared';
+import { formatTimeLimit, type DraftDTO, type TemplateDTO } from '@testrace/shared';
 import { api, ApiError } from '@/api';
 import { ErrorNote, IconTile, LoadingList, Page, PageHeader, SectionTitle } from '@/components/app';
 import { Badge } from '@/components/ui/badge';
@@ -146,7 +146,7 @@ export default function Home() {
                 to={`/template/${t.id}`}
                 icon={<IconTile emoji="📘" />}
                 title={t.title}
-                meta={`${t.questions.length} ta savol · ⏱ ${t.settings?.timePerQuestion ?? 15} s`}
+                meta={`${t.questions.length} ta savol · ⏱ ${formatTimeLimit(t.settings?.timePerQuestion)}`}
                 badge={
                   t.racesCount > 0 ? (
                     <Badge>🏁 {t.racesCount}</Badge>

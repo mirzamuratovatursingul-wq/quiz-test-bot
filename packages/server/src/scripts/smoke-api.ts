@@ -144,6 +144,24 @@ check(
   patchTpl.json().template.settings.shuffleQuestions === true,
 );
 
+const untimedPatch = await app.inject({
+  method: 'PATCH',
+  url: `/api/templates/${template.id}`,
+  payload: { settings: { timePerQuestion: 0 } },
+});
+check('vaqtsiz rejim (0) qabul qilindi', untimedPatch.json().template?.settings.timePerQuestion === 0, untimedPatch.body);
+const badTime = await app.inject({
+  method: 'PATCH',
+  url: `/api/templates/${template.id}`,
+  payload: { settings: { timePerQuestion: 3 } },
+});
+check('3 soniya rad etildi (0 yoki 5–120)', badTime.statusCode === 400, badTime.statusCode);
+await app.inject({
+  method: 'PATCH',
+  url: `/api/templates/${template.id}`,
+  payload: { settings: { timePerQuestion: 25 } },
+});
+
 console.log('\n6) Begona foydalanuvchi shablonni koʻra olmaydi');
 const otherOwner = await Template.create({
   ownerId: 999999,

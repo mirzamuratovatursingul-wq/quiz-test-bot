@@ -78,7 +78,11 @@ export default function NewTest() {
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) void run(`“${file.name}” o‘qilmoqda…`, () => api.uploadFile(file));
+          if (file) {
+            void run(`“${file.name}” o‘qilmoqda… Murakkab formatni AI tahlil qiladi — 1 daqiqagacha`, () =>
+              api.uploadFile(file),
+            );
+          }
         }}
       />
 

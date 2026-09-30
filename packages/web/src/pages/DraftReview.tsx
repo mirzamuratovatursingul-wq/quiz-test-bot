@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import type { DraftDTO, Question } from '@testrace/shared';
 import { api, ApiError } from '@/api';
 import { ErrorNote, LoadingList, Page, PageHeader, StickyAction } from '@/components/app';
-import { QuestionEditor } from '@/components/question-editor';
+import { AddQuestionButton, QuestionEditor } from '@/components/question-editor';
 import { DEFAULT_SETTINGS, SettingsForm, type Settings } from '@/components/settings-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,9 +19,9 @@ import {
   useTelegramMainButton,
   useUnsavedChanges,
 } from '@/hooks';
-import { cleanQuestion, isQuestionReady } from '@/lib/questions';
+import { cleanQuestion, emptyQuestion, isQuestionReady, newQuestionKey } from '@/lib/questions';
 import { cn } from '@/lib/utils';
-import { confirmMsg, haptic, selectionTap } from '@/telegram';
+import { confirmMsg, haptic, selectionTap, tap } from '@/telegram';
 
 /** O'zgarishdan keyin shuncha vaqt o'tib qoralama serverga yoziladi */
 const AUTOSAVE_MS = 1200;
@@ -46,6 +46,10 @@ export default function DraftReview() {
   const [focus, setFocus] = useState<Set<number> | null>(null);
   const onlyOpen = focus !== null;
   const [saveState, setSaveState] = useState<SaveState>('idle');
+  /** Savollarning barqaror kalitlari (questions bilan bir xil tartibda) */
+  const [keys, setKeys] = useState<number[]>([]);
+  /** Hozir to'ldirilayotgan yangi savol indeksi */
+  const [newIndex, setNewIndex] = useState<number | null>(null);
 
   useTelegramBackButton();
   useUnsavedChanges(saveState === 'pending' || saveState === 'saving' || saveState === 'error');
@@ -57,6 +61,8 @@ export default function DraftReview() {
       const res = await api.draft(id);
       setDraft(res.draft);
       setQuestions(res.draft.questions);
+      setKeys(res.draft.questions.map(newQuestionKey));
+      setNewIndex(null);
       setTitle(res.draft.title);
       setFocus(openIndices(res.draft.questions));
     } catch (err) {
@@ -124,12 +130,34 @@ export default function DraftReview() {
     markDirty();
   }
 
-  async function removeQuestion(index: number) {
-    if (!(await confirmMsg(`${index + 1}-savol o‘chirilsinmi?`))) return;
+  function dropQuestion(index: number) {
     const next = questions.filter((_, i) => i !== index);
     setQuestions(next);
+    setKeys((prev) => prev.filter((_, i) => i !== index));
+    setNewIndex((prev) => (prev === null || prev === index ? null : prev > index ? prev - 1 : prev));
     if (focus) setFocus(openIndices(next));
     markDirty();
+  }
+
+  async function removeQuestion(index: number) {
+    if (!(await confirmMsg(`${index + 1}-savol o‘chirilsinmi?`))) return;
+    dropQuestion(index);
+  }
+
+  function addQuestion() {
+    if (newIndex !== null) {
+      haptic('error');
+      toast.error('Avval yangi savolni to‘ldirib, “Savolni qo‘shish”ni bosing');
+      return;
+    }
+    tap();
+    const index = questions.length;
+    setQuestions((prev) => [...prev, emptyQuestion()]);
+    setKeys((prev) => [...prev, newQuestionKey()]);
+    setNewIndex(index);
+    // "Javobsizlar" filtri yoqilgan bo'lsa ham yangi savol ko'rinib tursin
+    setFocus((prev) => (prev ? new Set([...prev, index]) : prev));
+    list.showAll();
   }
 
   async function removeDraft() {
@@ -146,6 +174,11 @@ export default function DraftReview() {
   }
 
   async function confirm() {
+    if (newIndex !== null) {
+      haptic('error');
+      toast.error('Yangi savolni tugating yoki bekor qiling');
+      return;
+    }
     if (ready === 0) {
       haptic('error');
       toast.error('Kamida bitta savolning to‘g‘ri javobini belgilang');
@@ -279,11 +312,14 @@ export default function DraftReview() {
       <div className="mt-4 space-y-2.5">
         {list.visible.map(({ q, i }) => (
           <QuestionEditor
-            key={i}
+            key={keys[i] ?? `i${i}`}
             index={i}
             question={q}
             onChange={(next) => update(i, next)}
             onDelete={() => void removeQuestion(i)}
+            isNew={i === newIndex}
+            onCreated={() => setNewIndex(null)}
+            onDiscard={() => dropQuestion(i)}
           />
         ))}
         {onlyOpen && open === 0 && (
@@ -296,13 +332,15 @@ export default function DraftReview() {
         )}
       </div>
 
-      {list.hasMore && (
+      {list.hasMore ? (
         <div ref={list.sentinelRef} className="space-y-2.5 pt-2.5">
           <Skeleton className="h-28 w-full rounded-xl" />
           <p className="text-center text-[12.5px] text-muted-foreground">
             {list.shown}/{list.total} ta savol ko‘rsatildi
           </p>
         </div>
+      ) : (
+        newIndex === null && <AddQuestionButton onClick={addQuestion} />
       )}
 
       <StickyAction>

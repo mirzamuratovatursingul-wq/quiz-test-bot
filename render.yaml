@@ -22,3 +22,7 @@ services:
         sync: false
       - key: WEBAPP_URL
         sync: false        # Vercel bergan manzil
+      - key: GEMINI_API_KEY
+        sync: false        # AI tahlil uchun (https://aistudio.google.com/apikey)
+      - key: AI_MODE
+        value: auto

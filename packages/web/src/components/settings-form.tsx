@@ -1,5 +1,11 @@
 import { Minus, Plus } from 'lucide-react';
-import type { TemplateDTO } from '@testrace/shared';
+import {
+  isUntimed,
+  MAX_TIME_PER_QUESTION,
+  MIN_TIME_PER_QUESTION,
+  UNTIMED,
+  type TemplateDTO,
+} from '@testrace/shared';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { selectionTap } from '@/telegram';
@@ -35,26 +41,39 @@ export function SettingsForm({
   };
   const limits = LIMIT_PRESETS.filter((n) => n < max);
   const time = settings.timePerQuestion;
+  const untimed = isUntimed(time);
   const limit = settings.questionLimit;
   const perRace = limit > 0 && limit < max ? limit : max;
   const totalSec = perRace * (time + 2);
 
   return (
     <div className="space-y-6">
-      <Field label="⏱ Har bir savolga vaqt" hint="Guruhda so‘rovnoma shuncha soniya ochiq turadi">
+      <Field
+        label="⏱ Har bir savolga vaqt"
+        hint={
+          untimed
+            ? 'Hamma savol guruhga birdaniga oddiy so‘rovnoma bo‘lib yuboriladi — istalgan paytda javob beriladi'
+            : 'Guruhda so‘rovnoma shuncha soniya ochiq turadi'
+        }
+      >
         <Chips
-          items={TIME_PRESETS.map((n) => ({ value: n, label: `${n} s` }))}
+          items={[
+            { value: UNTIMED, label: 'Vaqtsiz' },
+            ...TIME_PRESETS.map((n) => ({ value: n, label: `${n} s` })),
+          ]}
           value={time}
           onSelect={(n) => set({ timePerQuestion: n })}
         />
-        <Stepper
-          value={time}
-          suffix="soniya"
-          onChange={(n) => set({ timePerQuestion: clamp(n, 5, 120) })}
-          step={5}
-          min={5}
-          max={120}
-        />
+        {!untimed && (
+          <Stepper
+            value={time}
+            suffix="soniya"
+            onChange={(n) => set({ timePerQuestion: clamp(n, MIN_TIME_PER_QUESTION, MAX_TIME_PER_QUESTION) })}
+            step={5}
+            min={MIN_TIME_PER_QUESTION}
+            max={MAX_TIME_PER_QUESTION}
+          />
+        )}
       </Field>
 
       <Field label="🔢 Musobaqadagi savollar soni" hint={`Jami ${max} ta savol bor`}>
@@ -65,10 +84,18 @@ export function SettingsForm({
         />
       </Field>
 
-      <p className="rounded-[12px] bg-muted px-3 py-2 text-[13px] text-muted-foreground">
-        ⌛ Musobaqa taxminan <b className="text-foreground">{formatDuration(totalSec)}</b> davom etadi
-        ({perRace} savol).
-      </p>
+      {untimed ? (
+        <p className="rounded-[12px] bg-muted px-3 py-2 text-[13px] leading-relaxed text-muted-foreground">
+          📝 {perRace} ta savol so‘rovnoma bo‘lib ketma-ket yuboriladi va ochiq turadi. Natijalarni guruh
+          admini <b className="text-foreground">«Yakunlash»</b> tugmasi yoki /yakunlash bilan e’lon qiladi.
+          Har bir to‘g‘ri javob — 100 ball.
+        </p>
+      ) : (
+        <p className="rounded-[12px] bg-muted px-3 py-2 text-[13px] text-muted-foreground">
+          ⌛ Musobaqa taxminan <b className="text-foreground">{formatDuration(totalSec)}</b> davom etadi
+          ({perRace} savol).
+        </p>
+      )}
 
       <div className="space-y-4 border-t border-border pt-5">
         <Toggle
@@ -83,12 +110,14 @@ export function SettingsForm({
           checked={settings.shuffleOptions}
           onChange={(v) => set({ shuffleOptions: v })}
         />
-        <Toggle
-          label="⚡ Tezlik bonusi"
-          hint="Tez javob bergan ko‘proq ball oladi (100 + 100 gacha)"
-          checked={settings.speedBonus}
-          onChange={(v) => set({ speedBonus: v })}
-        />
+        {!untimed && (
+          <Toggle
+            label="⚡ Tezlik bonusi"
+            hint="Tez javob bergan ko‘proq ball oladi (100 + 100 gacha)"
+            checked={settings.speedBonus}
+            onChange={(v) => set({ speedBonus: v })}
+          />
+        )}
       </div>
     </div>
   );

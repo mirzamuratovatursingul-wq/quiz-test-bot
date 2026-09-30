@@ -1,9 +1,10 @@
 import { InputFile, type Bot, type Context } from 'grammy';
-import { parseTestText, optionLabel, type Question } from '@testrace/shared';
+import { formatTimeLimit, isUntimed, optionLabel, type ParseResult, type Question } from '@testrace/shared';
 import { config } from '../../config.js';
 import { Draft, Template, User } from '../../db/models.js';
 import { logger } from '../../logger.js';
-import { ExtractError, extractText } from '../../services/extract.service.js';
+import { ExtractError } from '../../services/extract.service.js';
+import { importTestFile, importTestText } from '../../services/test-import.service.js';
 import { buildTestPdf } from '../../services/pdf.service.js';
 import { downloadTelegramFile, escapeHtml } from '../../services/telegram.service.js';
 import {
@@ -32,6 +33,20 @@ const PDF_CAPTIONS: Record<PdfMode, string> = {
 };
 const PDF_SUFFIX: Record<PdfMode, string> = { plain: '', key: '-kalit', teacher: '-oqituvchi' };
 
+const AI_STATUS = '\u{1F916} Format murakkab ekan — AI tahlil qilmoqda, 1 daqiqagacha kuting…';
+
+/** Uzoq ishni bot navbatini to'sib qo'ymasdan fonda bajarish */
+function runInBackground(task: () => Promise<void>) {
+  task().catch((err) => logger.error('Fon vazifasida xato', err));
+}
+
+/** AI ishga tushganini holat xabarida ko'rsatish */
+async function announceAi(ctx: Context, messageId: number) {
+  if (!ctx.chat) return;
+  await ctx.api.editMessageText(ctx.chat.id, messageId, AI_STATUS).catch(() => undefined);
+  await ctx.replyWithChatAction('typing').catch(() => undefined);
+}
+
 function guessTitle(fileName?: string, text?: string): string {
   if (fileName) {
     const base = fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
@@ -54,6 +69,7 @@ function draftSummary(params: {
     plus: '"+" belgisi boʻyicha',
     answer_key: 'javoblar kaliti boʻyicha',
     mixed: '"+" va kalit boʻyicha',
+    ai: '\u{1F916} AI tahlili (belgilangan javoblar boʻyicha)',
     none: 'aniqlanmadi',
   };
 
@@ -107,7 +123,9 @@ function templateCard(template: {
   return [
     `\u{1F4DA} <b>${escapeHtml(template.title)}</b>`,
     ``,
-    `❓ ${questions.length} ta savol · ⏱ savolga ${template.settings?.timePerQuestion ?? 15} s`,
+    isUntimed(template.settings?.timePerQuestion)
+      ? `❓ ${questions.length} ta savol · ⏳ vaqtsiz (oddiy soʻrovnoma)`
+      : `❓ ${questions.length} ta savol · ⏱ savolga ${formatTimeLimit(template.settings?.timePerQuestion)}`,
     races > 0 ? `\u{1F3C1} ${races} marta musobaqa oʻtkazilgan` : `\u{1F195} Hali musobaqa oʻtkazilmagan`,
     ``,
     preview,
@@ -120,12 +138,12 @@ function templateCard(template: {
 
 async function handleParsedText(
   ctx: Context,
-  params: { text: string; sourceType: 'pdf' | 'docx' | 'text'; fileName?: string },
+  params: { result: ParseResult; text: string; sourceType: 'pdf' | 'docx' | 'text'; fileName?: string },
 ) {
   const userId = ctx.from?.id;
   if (!userId) return;
 
-  const result = parseTestText(params.text);
+  const { result } = params;
 
   if (result.questions.length === 0) {
     await ctx.reply(
@@ -218,26 +236,34 @@ export function registerPrivateHandlers(bot: Bot) {
 
     await ctx.replyWithChatAction('typing').catch(() => undefined);
     const status = await ctx.reply(t.analyzing);
-    try {
-      const buffer = await downloadTelegramFile(ctx.api, doc.file_id);
-      const extracted = await extractText(buffer, doc.file_name ?? 'test.txt', doc.mime_type);
-      await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => undefined);
-      await handleParsedText(ctx, {
-        text: extracted.text,
-        sourceType: extracted.sourceType,
-        fileName: doc.file_name,
-      });
-    } catch (err) {
-      await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => undefined);
-      if (err instanceof ExtractError) {
-        await ctx.reply(`⚠️ ${err.message}`);
-      } else {
-        logger.error('Hujjatni qayta ishlashda xato', err);
-        await ctx.reply(
-          '❌ Faylni qayta ishlab boʻlmadi. Qaytadan yuboring yoki test matnini nusxalab joylang.',
-        );
+    // AI tahlili bir daqiqagacha cho'zilishi mumkin. bot.start() yangilanishlarni ketma-ket
+    // ishlagani uchun kutib tursak, guruhdagi musobaqa javoblari ham to'xtab qoladi —
+    // shuning uchun tahlil fonda davom etadi.
+    runInBackground(async () => {
+      try {
+        const buffer = await downloadTelegramFile(ctx.api, doc.file_id);
+        const extracted = await importTestFile(buffer, doc.file_name ?? 'test.txt', doc.mime_type, {
+          onAiStart: () => announceAi(ctx, status.message_id),
+        });
+        await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => undefined);
+        await handleParsedText(ctx, {
+          result: extracted.result,
+          text: extracted.text,
+          sourceType: extracted.sourceType,
+          fileName: doc.file_name,
+        });
+      } catch (err) {
+        await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => undefined);
+        if (err instanceof ExtractError) {
+          await ctx.reply(`⚠️ ${err.message}`);
+        } else {
+          logger.error('Hujjatni qayta ishlashda xato', err);
+          await ctx.reply(
+            '❌ Faylni qayta ishlab boʻlmadi. Qaytadan yuboring yoki test matnini nusxalab joylang.',
+          );
+        }
       }
-    }
+    });
   });
 
   /* ---------------- Matn ---------------- */
@@ -271,7 +297,23 @@ export function registerPrivateHandlers(bot: Bot) {
     }
 
     await ctx.replyWithChatAction('typing').catch(() => undefined);
-    await handleParsedText(ctx, { text, sourceType: 'text' });
+    runInBackground(async () => {
+      let statusId: number | undefined;
+      try {
+        const { result } = await importTestText(text, {
+          onAiStart: async () => {
+            const status = await ctx.reply(AI_STATUS).catch(() => undefined);
+            statusId = status?.message_id;
+          },
+        });
+        await handleParsedText(ctx, { result, text, sourceType: 'text' });
+      } catch (err) {
+        logger.error('Matnni tahlil qilishda xato', err);
+        await ctx.reply('❌ Matnni tahlil qilib boʻlmadi. Birozdan soʻng qayta urinib koʻring.');
+      } finally {
+        if (statusId) await ctx.api.deleteMessage(ctx.chat.id, statusId).catch(() => undefined);
+      }
+    });
   });
 
   bot.chatType('private').command(['shablonlarim', 'templates'], async (ctx) => {
