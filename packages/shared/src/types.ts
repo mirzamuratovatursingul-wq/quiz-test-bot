@@ -96,8 +96,36 @@ export interface TemplateDTO {
   sourceType: 'pdf' | 'docx' | 'text' | 'manual';
   sourceFileName?: string;
   racesCount: number;
+  /** Ulashish kodi (egasi yaratgan bo'lsa) — boshqalar shu kod bilan nusxa oladi */
+  shareCode?: string | null;
+  /** Kod orqali olingan nusxa bo'lsa — kimdan olingani (asl shablonga bog'liq emas) */
+  copiedFrom?: { ownerName: string; code: string; at: string } | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Ulashish kodi bo'yicha ko'rinish (nusxa olishdan oldin) */
+export interface SharedTemplatePreviewDTO {
+  code: string;
+  title: string;
+  questions: number;
+  ownerName: string;
+  timePerQuestion: number;
+  /** So'rovchining o'zi egasi */
+  isOwn: boolean;
+  /** So'rovchida bu shablonning nusxasi allaqachon bor */
+  alreadyCopiedId: string | null;
+}
+
+/** Ulashish kodi: chalkash belgilarsiz (0/O, 1/I/L yo'q) */
+export const SHARE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export const SHARE_CODE_LENGTH = 6;
+
+/** Foydalanuvchi yozgan kodni tozalash: "k7m-2qx" -> "K7M2QX". Noto'g'ri bo'lsa null */
+export function normalizeShareCode(input: string): string | null {
+  const code = input.toUpperCase().replace(/[\s_-]+/g, '');
+  if (code.length !== SHARE_CODE_LENGTH) return null;
+  return [...code].every((ch) => SHARE_CODE_ALPHABET.includes(ch)) ? code : null;
 }
 
 export interface DraftDTO {

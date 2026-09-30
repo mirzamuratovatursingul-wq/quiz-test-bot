@@ -231,6 +231,52 @@ check('200 javob', delRes.statusCode === 200);
 const afterDel = await app.inject({ method: 'GET', url: '/api/templates' });
 check('roʻyxat boʻshadi', afterDel.json().templates.length === 0);
 
+console.log('\n11) Ulashish: kod orqali nusxa olish');
+{
+  const { ensureShareCode } = await import('../services/template-share.service.js');
+  const { User } = await import('../db/models.js');
+  await User.create({ telegramId: 999999, firstName: 'Ustoz' });
+  // Begona foydalanuvchi (999999) o'z shablonini ulashdi
+  const sourceCode = await ensureShareCode(otherOwner as never);
+  check('kod 6 ta belgi', /^[A-Z2-9]{6}$/.test(sourceCode), sourceCode);
+  check('qayta soʻralganda oʻsha kod', (await ensureShareCode((await Template.findById(otherOwner._id)) as never)) === sourceCode);
+
+  const preview = await app.inject({ method: 'GET', url: `/api/templates/shared/${sourceCode.toLowerCase()}` });
+  check('kod boʻyicha koʻrinish (kichik harf bilan ham)', preview.json().preview?.title === 'Begona', preview.body);
+  check('egasining ismi koʻrinadi', preview.json().preview?.ownerName === 'Ustoz', preview.json().preview);
+
+  const imported = await app.inject({ method: 'POST', url: '/api/templates/import', payload: { code: sourceCode } });
+  check('nusxa olindi (201)', imported.statusCode === 201, imported.body);
+  const copy = imported.json().template;
+  check('nusxa foydalanuvchiniki', copy?.ownerId === USER_ID, copy?.ownerId);
+  check('nusxada savollar bor', copy?.questions.length === 1);
+  check('nusxada kimdan olingani yozilgan', copy?.copiedFrom?.ownerName === 'Ustoz', copy?.copiedFrom);
+  check('nusxaga asl kod koʻchmadi', !copy?.shareCode, copy?.shareCode);
+
+  const again = await app.inject({ method: 'POST', url: '/api/templates/import', payload: { code: sourceCode } });
+  check('qayta olinganda yangi nusxa yaratilmadi', again.json().already === true && again.json().template.id === copy.id);
+
+  // Asl shablon o'chirildi — nusxa qolishi kerak
+  await Template.deleteOne({ _id: otherOwner._id });
+  const copyAfter = await app.inject({ method: 'GET', url: `/api/templates/${copy.id}` });
+  check('egasi oʻchirgandan keyin ham nusxa bor', copyAfter.statusCode === 200 && copyAfter.json().template.questions.length === 1);
+  const deadCode = await app.inject({ method: 'POST', url: '/api/templates/import', payload: { code: sourceCode } });
+  check('oʻchirilgan shablon kodi endi ishlamaydi (404)', deadCode.statusCode === 404, deadCode.statusCode);
+
+  // O'z shablonini ulashish va bekor qilish
+  const shareRes = await app.inject({ method: 'POST', url: `/api/templates/${copy.id}/share` });
+  const ownCode = shareRes.json().code as string;
+  check('oʻz shablonini ulashish kodi', /^[A-Z2-9]{6}$/.test(ownCode ?? ''), shareRes.body);
+  check('yangi kod asl koddan farqli', ownCode !== sourceCode);
+  const ownImport = await app.inject({ method: 'POST', url: '/api/templates/import', payload: { code: ownCode } });
+  check('oʻz shablonini import qilib boʻlmaydi (409)', ownImport.statusCode === 409, ownImport.statusCode);
+  await app.inject({ method: 'DELETE', url: `/api/templates/${copy.id}/share` });
+  const revoked = await app.inject({ method: 'GET', url: `/api/templates/shared/${ownCode}` });
+  check('bekor qilingan kod ishlamaydi', revoked.statusCode === 404, revoked.statusCode);
+  const badCode = await app.inject({ method: 'GET', url: '/api/templates/shared/ABC' });
+  check('notoʻgʻri formatdagi kod — 400', badCode.statusCode === 400, badCode.statusCode);
+}
+
 await app.close();
 await mongoose.disconnect();
 await mongo.stop();

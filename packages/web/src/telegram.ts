@@ -161,6 +161,32 @@ export function openTelegramLink(url: string) {
   else window.open(url, '_blank');
 }
 
+/**
+ * Matnni buferga nusxalash. Telegram WebView'da clipboard API ba'zan yopiq bo'ladi —
+ * shunda eski execCommand usuli sinaladi. Muvaffaqiyatli bo'lsa true.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    try {
+      return document.execCommand('copy');
+    } catch {
+      return false;
+    } finally {
+      area.remove();
+    }
+  }
+}
+
 /** Saqlanmagan o'zgarish bo'lsa, yopishdan oldin so'rash */
 export function setClosingConfirmation(enabled: boolean) {
   if (enabled) tg?.enableClosingConfirmation?.();

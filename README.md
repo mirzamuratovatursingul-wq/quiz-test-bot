@@ -255,8 +255,15 @@ Kalit bo‘lmasa, skaner PDF ishlamaydi — ichida matn bo‘lishi kerak.
 
 ## Buyruqlar
 
-**Shaxsiy:** `/start` `/shablonlarim` `/statistika` `/yordam`
+**Shaxsiy:** `/start` `/shablonlarim` `/statistika` `/nusxa` `/yordam`
 **Guruh:** `/boshlash` `/toxtat` `/holat` `/yakunlash`
+
+**Shablonni ulashish.** Shablon sahifasida (yoki bot kartasida) **🔗 Ulashish** → 6 belgili
+noyob kod yaratiladi (masalan `K7M2QX`, chalkash 0/O, 1/I belgilarsiz). Kodni olgan odam uni
+botga yuboradi (`/nusxa K7M2QX`, kodning o‘zi yoki `t.me/<bot>?start=copy_K7M2QX` havolasi)
+yoki panelda **Kod orqali shablon qo‘shish** ga yozadi. Shablonning **mustaqil nusxasi** uning
+ro‘yxatiga tushadi va u o‘zi admin bo‘lgan guruhlarda ishlatadi. Egasi shablonni o‘zgartirsa,
+o‘chirsa yoki ulashishni to‘xtatsa ham, olingan nusxalar egalarida qoladi.
 
 **Vaqtsiz rejim.** Sozlamalarda "⏱ Vaqt" → **Vaqtsiz** tanlansa, test guruhga oddiy quiz
 so‘rovnomalari bo‘lib birdaniga yuboriladi. Vaqt chegarasi yo‘q, har kim istalgan paytda
@@ -271,7 +278,7 @@ Bot qayta ishga tushsa (deploy), ochiq test tiklanadi va javoblar yo‘qolmaydi.
 Tashqi xizmat kerak emas — MongoDB xotirada, Telegram API soxta (mock):
 
 ```bash
-npm test                                  # formatlar (23) + API (35) + musobaqa (65) sinovlari
+npm test                                  # formatlar (23) + API (52) + musobaqa (65) sinovlari
 DUMP=1 npm run smoke:race -w @testrace/server   # soʻrovnoma va yakuniy xabar koʻrinishini chop etadi
 npm run check:formats -w @testrace/server # tahlilchini 22 ta format va haqiqiy PDF da tekshirish
 npm run check:parser -w @testrace/server -- ./test.pdf   # istalgan PDF/DOCX/TXT ni tahlil qilib chop etish

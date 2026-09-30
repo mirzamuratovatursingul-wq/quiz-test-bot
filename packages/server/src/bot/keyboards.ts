@@ -84,9 +84,20 @@ export function templateKeyboard(templateId: string, backPage?: number): InlineK
     .text('\u{1F511} Kalit', `tpl:pdf:${templateId}:key`)
     .text('\u{1F469}‍\u{1F3EB} Oʻqituvchi', `tpl:pdf:${templateId}:teacher`)
     .row();
-  miniAppButton(kb, '✏️ Panelda tahrirlash', `/template/${templateId}`);
+  kb.text('\u{1F517} Ulashish (kod)', `tpl:code:${templateId}`);
+  miniAppButton(kb, '✏️ Tahrirlash', `/template/${templateId}`);
   if (backPage !== undefined) kb.row().text('⬅️ Roʻyxatga qaytish', `tpl:list:${backPage}`);
   return kb;
+}
+
+/** Ulashish kodi xabari: do'stga yuborish tugmasi */
+export function shareCodeKeyboard(link: string | null, code: string, title: string): InlineKeyboard | undefined {
+  if (!link) return undefined;
+  const text = `\u{1F4DA} «${title}» testini oling — kod: ${code}`;
+  return new InlineKeyboard().url(
+    '\u{1F4E8} Doʻstga yuborish',
+    `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`,
+  );
 }
 
 /** Shablonlar ro'yxati: sahifalab, har sahifada `perPage` ta */

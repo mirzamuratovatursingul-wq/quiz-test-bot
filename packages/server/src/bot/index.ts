@@ -86,6 +86,7 @@ export async function startBot(): Promise<BotBundle> {
       { command: 'start', description: 'Botni ishga tushirish' },
       { command: 'shablonlarim', description: 'Saqlangan test shablonlari' },
       { command: 'statistika', description: 'Shaxsiy statistika' },
+      { command: 'nusxa', description: 'Kod orqali shablon nusxasini olish' },
       { command: 'yordam', description: "Qoʻllanma" },
     ],
     { scope: { type: 'all_private_chats' } },

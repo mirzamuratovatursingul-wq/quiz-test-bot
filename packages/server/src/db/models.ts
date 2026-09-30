@@ -69,11 +69,35 @@ const templateSchema = new Schema(
     sourceType: { type: String, enum: ['pdf', 'docx', 'text', 'manual'], default: 'manual' },
     sourceFileName: { type: String, default: '' },
     racesCount: { type: Number, default: 0 },
+    /**
+     * Ulashish kodi. Default qiymat YO'Q (null ham emas): sparse unique indeks faqat
+     * maydoni bor hujjatlarni tekshiradi, kodni bekor qilishda $unset ishlatiladi.
+     */
+    shareCode: { type: String },
+    /**
+     * Kod orqali olingan nusxa: kimdan olingani. Nusxa savollari o'zida saqlanadi,
+     * shuning uchun asl shablon o'chirilsa ham nusxa to'liq ishlaydi.
+     */
+    copiedFrom: {
+      type: new Schema(
+        {
+          templateId: { type: Schema.Types.ObjectId },
+          ownerId: { type: Number },
+          ownerName: { type: String, default: '' },
+          code: { type: String, default: '' },
+          at: { type: Date, default: Date.now },
+        },
+        { _id: false },
+      ),
+      default: undefined,
+    },
   },
   { timestamps: true },
 );
 
 templateSchema.index({ ownerId: 1, createdAt: -1 });
+templateSchema.index({ shareCode: 1 }, { unique: true, sparse: true });
+templateSchema.index({ ownerId: 1, 'copiedFrom.templateId': 1 });
 
 export type TemplateDoc = HydratedDocument<InferSchemaType<typeof templateSchema>>;
 export const Template = model('Template', templateSchema);

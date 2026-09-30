@@ -1,4 +1,11 @@
-import type { DraftDTO, Question, RaceDTO, TemplateDTO, UserProfileDTO } from '@testrace/shared';
+import type {
+  DraftDTO,
+  Question,
+  RaceDTO,
+  SharedTemplatePreviewDTO,
+  TemplateDTO,
+  UserProfileDTO,
+} from '@testrace/shared';
 import { initData } from '@/telegram';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
@@ -83,6 +90,18 @@ export const api = {
     request<{ template: TemplateDTO }>(`/api/templates/${id}/duplicate`, { method: 'POST' }),
   sendTemplatePdf: (id: string, mode: 'plain' | 'key' | 'teacher') =>
     request<{ ok: true }>(`/api/templates/${id}/send-pdf?mode=${mode}`, { method: 'POST' }),
+
+  /* Ulashish: kod orqali nusxa */
+  shareTemplate: (id: string) =>
+    request<{ code: string; link: string | null }>(`/api/templates/${id}/share`, { method: 'POST' }),
+  unshareTemplate: (id: string) => request<{ ok: true }>(`/api/templates/${id}/share`, { method: 'DELETE' }),
+  sharedPreview: (code: string) =>
+    request<{ preview: SharedTemplatePreviewDTO }>(`/api/templates/shared/${encodeURIComponent(code)}`),
+  importTemplate: (code: string) =>
+    request<{ template: TemplateDTO; already: boolean }>('/api/templates/import', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
 
   /* Qoralamalar */
   drafts: () => request<{ drafts: DraftDTO[] }>('/api/drafts'),

@@ -18,6 +18,7 @@ import { ErrorNote, IconTile, LoadingList, Page, PageHeader, SectionTitle } from
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ImportByCodeSheet } from '@/components/share';
 import { isQuestionReady } from '@/lib/questions';
 import { currentUser, tap } from '@/telegram';
 
@@ -146,7 +147,7 @@ export default function Home() {
                 to={`/template/${t.id}`}
                 icon={<IconTile emoji="📘" />}
                 title={t.title}
-                meta={`${t.questions.length} ta savol · ⏱ ${formatTimeLimit(t.settings?.timePerQuestion)}`}
+                meta={`${t.questions.length} ta savol · ⏱ ${formatTimeLimit(t.settings?.timePerQuestion)}${t.copiedFrom ? ' · 📥 nusxa' : ''}`}
                 badge={
                   t.racesCount > 0 ? (
                     <Badge>🏁 {t.racesCount}</Badge>
@@ -164,6 +165,8 @@ export default function Home() {
           </div>
         </>
       )}
+
+      {!loading && !error && <ImportByCodeSheet />}
 
       {/* Tajribali foydalanuvchiga qo'llanma xalaqit bermasin — faqat boshida */}
       {!loading && !empty && templates.length < 3 && <HowItWorks />}

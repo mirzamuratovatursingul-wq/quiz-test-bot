@@ -1,10 +1,23 @@
 import { InputFile, type Bot, type Context } from 'grammy';
-import { formatTimeLimit, isUntimed, optionLabel, type ParseResult, type Question } from '@testrace/shared';
+import {
+  formatTimeLimit,
+  isUntimed,
+  normalizeShareCode,
+  optionLabel,
+  type ParseResult,
+  type Question,
+} from '@testrace/shared';
 import { config } from '../../config.js';
 import { Draft, Template, User } from '../../db/models.js';
 import { logger } from '../../logger.js';
 import { ExtractError } from '../../services/extract.service.js';
 import { importTestFile, importTestText } from '../../services/test-import.service.js';
+import {
+  copyByCode,
+  ensureShareCode,
+  shareLink,
+  ShareError,
+} from '../../services/template-share.service.js';
 import { buildTestPdf } from '../../services/pdf.service.js';
 import { downloadTelegramFile, escapeHtml } from '../../services/telegram.service.js';
 import {
@@ -14,6 +27,7 @@ import {
   isHttps,
   mainMenuKeyboard,
   openAppKeyboard,
+  shareCodeKeyboard,
   templateKeyboard,
   templatesListKeyboard,
   webAppUrl,
@@ -109,6 +123,7 @@ function templateCard(template: {
   questions: unknown;
   racesCount?: number;
   settings?: { timePerQuestion?: number } | null;
+  copiedFrom?: { ownerName?: string | null } | null;
 }): string {
   const questions = template.questions as Question[];
   const preview = questions
@@ -127,6 +142,7 @@ function templateCard(template: {
       ? `❓ ${questions.length} ta savol · ⏳ vaqtsiz (oddiy soʻrovnoma)`
       : `❓ ${questions.length} ta savol · ⏱ savolga ${formatTimeLimit(template.settings?.timePerQuestion)}`,
     races > 0 ? `\u{1F3C1} ${races} marta musobaqa oʻtkazilgan` : `\u{1F195} Hali musobaqa oʻtkazilmagan`,
+    template.copiedFrom ? `\u{1F4E5} ${escapeHtml(template.copiedFrom.ownerName || 'Boshqa foydalanuvchi')} ulashgan nusxa` : '',
     ``,
     preview,
     questions.length > 3 ? `<i>…va yana ${questions.length - 3} ta savol</i>` : '',
@@ -202,6 +218,12 @@ async function handleParsedText(
 
 export function registerPrivateHandlers(bot: Bot) {
   bot.chatType('private').command('start', async (ctx) => {
+    // Ulashish havolasi: t.me/bot?start=copy_K7M2QX
+    const copy = /^copy_(\w+)$/i.exec(ctx.match ?? '');
+    if (copy) {
+      await copyTemplateByCode(ctx, copy[1]!);
+      return;
+    }
     const hasPanel = isHttps(webAppUrl('/'));
     await ctx.reply(t.start(escapeHtml(ctx.from?.first_name ?? 'doʻst'), hasPanel), {
       parse_mode: 'HTML',
@@ -218,6 +240,19 @@ export function registerPrivateHandlers(bot: Bot) {
         reply_markup: openAppKeyboard('/'),
       });
     }
+  });
+
+  /* /nusxa K7M2QX — kod bo'yicha shablon nusxasini olish */
+  bot.chatType('private').command(['nusxa', 'copy'], async (ctx) => {
+    const code = (ctx.match ?? '').trim();
+    if (!code) {
+      await ctx.reply(
+        '\u{1F4E5} Shablon egasi bergan kodni yozing, masalan:\n<code>/nusxa K7M2QX</code>\n\nYoki kodning oʻzini xabar qilib yuboring.',
+        { parse_mode: 'HTML' },
+      );
+      return;
+    }
+    await copyTemplateByCode(ctx, code);
   });
 
   bot.chatType('private').command(['help', 'yordam'], async (ctx) => {
@@ -287,6 +322,12 @@ export function registerPrivateHandlers(bot: Bot) {
         return;
       default:
         break;
+    }
+
+    // Faqat ulashish kodi yuborilgan bo'lsa ("K7M2QX")
+    if (normalizeShareCode(text)) {
+      const handled = await copyTemplateByCode(ctx, text, { quietIfMissing: !/\d/.test(text) });
+      if (handled) return;
     }
 
     if (text.length < MIN_TEXT_LENGTH) {
@@ -456,6 +497,32 @@ export function registerPrivateHandlers(bot: Bot) {
     }
   });
 
+  /* Ulashish kodi */
+  bot.callbackQuery(/^tpl:code:(.+)$/, async (ctx) => {
+    const template = await Template.findOne({ _id: ctx.match[1]!, ownerId: ctx.from.id }).catch(() => null);
+    if (!template) {
+      await ctx.answerCallbackQuery({ text: 'Shablon topilmadi.', show_alert: true });
+      return;
+    }
+    const code = await ensureShareCode(template);
+    const link = shareLink(code);
+    await ctx.answerCallbackQuery();
+    await ctx.reply(
+      [
+        `\u{1F517} <b>Ulashish kodi</b> · ${escapeHtml(template.title)}`,
+        '',
+        `<code>${code}</code>`,
+        '',
+        'Kodni olgan odam uni botga yuboradi yoki panelda «Kod orqali qoʻshish»ga yozadi —',
+        'shablonning <b>nusxasi</b> uning roʻyxatiga tushadi va u oʻzi admin boʻlgan guruhlarda ishlata oladi.',
+        link ? `\nHavola: ${link}` : '',
+        '',
+        '<i>Siz shablonni oʻzgartirsangiz yoki oʻchirsangiz ham, olingan nusxalar egalarida qoladi.</i>',
+      ].join('\n'),
+      { parse_mode: 'HTML', reply_markup: shareCodeKeyboard(link, code, template.title), link_preview_options: { is_disabled: true } },
+    );
+  });
+
   bot.callbackQuery(/^tpl:share:(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.reply(
@@ -472,6 +539,43 @@ export function registerPrivateHandlers(bot: Bot) {
 }
 
 /* -------------------------------------------------------------- */
+
+/**
+ * Kod bo'yicha shablon nusxasini olish va natijani ko'rsatish.
+ * `quietIfMissing` — oddiy so'z tasodifan kodga o'xshab qolsa, "topilmadi" deb javob bermaslik.
+ * Qaytaradi: xabar yuborildimi.
+ */
+async function copyTemplateByCode(
+  ctx: Context,
+  rawCode: string,
+  options: { quietIfMissing?: boolean } = {},
+): Promise<boolean> {
+  const userId = ctx.from?.id;
+  if (!userId) return false;
+  try {
+    const { template, already } = await copyByCode(rawCode, userId);
+    await ctx.reply(
+      [
+        already ? '\u{1F4DA} <b>Bu shablon roʻyxatingizda bor</b>' : '\u{1F4E5} <b>Shablon roʻyxatingizga qoʻshildi!</b>',
+        '',
+        templateCard(template),
+        '',
+        '\u{1F447} Endi uni oʻzingiz admin boʻlgan guruhda ishlatishingiz mumkin.',
+      ].join('\n'),
+      { parse_mode: 'HTML', reply_markup: templateKeyboard(String(template._id)) },
+    );
+    return true;
+  } catch (err) {
+    if (err instanceof ShareError) {
+      if (options.quietIfMissing && err.code === 'not_found') return false;
+      await ctx.reply(`⚠️ ${err.message}`);
+      return true;
+    }
+    logger.error('Shablon nusxasini olishda xato', err);
+    await ctx.reply('❌ Nusxa olib boʻlmadi. Birozdan soʻng qayta urinib koʻring.');
+    return true;
+  }
+}
 
 /** Shablonlar ro'yxati. `edit` — callbackdan chaqirilganda xabarni joyida yangilash. */
 async function sendTemplates(ctx: Context, page: number, edit = false) {

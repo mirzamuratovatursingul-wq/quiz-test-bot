@@ -13,6 +13,14 @@ import { buildTestPdf } from '../../services/pdf.service.js';
 import { currentUser, requireAuth } from '../auth.js';
 import { getBot } from '../../bot/index.js';
 import { logger } from '../../logger.js';
+import {
+  copyByCode,
+  ensureShareCode,
+  previewByCode,
+  revokeShareCode,
+  shareLink,
+  ShareError,
+} from '../../services/template-share.service.js';
 
 const questionSchema = z.object({
   text: z.string().min(1).max(2000),
@@ -59,6 +67,8 @@ export function toTemplateDTO(doc: {
   sourceType: string;
   sourceFileName?: string | null;
   racesCount: number;
+  shareCode?: string | null;
+  copiedFrom?: { ownerName?: string | null; code?: string | null; at?: Date | null } | null;
   createdAt?: Date;
   updatedAt?: Date;
 }): TemplateDTO {
@@ -74,6 +84,14 @@ export function toTemplateDTO(doc: {
     sourceType: doc.sourceType as TemplateDTO['sourceType'],
     sourceFileName: doc.sourceFileName ?? '',
     racesCount: doc.racesCount,
+    shareCode: doc.shareCode ?? null,
+    copiedFrom: doc.copiedFrom
+      ? {
+          ownerName: doc.copiedFrom.ownerName ?? '',
+          code: doc.copiedFrom.code ?? '',
+          at: (doc.copiedFrom.at ?? new Date()).toISOString(),
+        }
+      : null,
     createdAt: (doc.createdAt ?? new Date()).toISOString(),
     updatedAt: (doc.updatedAt ?? new Date()).toISOString(),
   };
@@ -158,6 +176,51 @@ export async function templateRoutes(app: FastifyInstance) {
       status: doc.status,
     });
     return reply.code(201).send({ template: toTemplateDTO(copy as never) });
+  });
+
+  /* Ulashish kodi: bor bo'lsa o'sha, yo'q bo'lsa yangisi */
+  app.post<{ Params: { id: string } }>('/api/templates/:id/share', async (req, reply) => {
+    const user = currentUser(req);
+    const doc = await Template.findOne({ _id: req.params.id, ownerId: user.id });
+    if (!doc) return reply.code(404).send({ error: 'not_found', message: 'Shablon topilmadi' });
+    const code = await ensureShareCode(doc);
+    return { code, link: shareLink(code) };
+  });
+
+  /* Ulashishni to'xtatish: kod ishlamay qoladi, olingan nusxalar egalarida qoladi */
+  app.delete<{ Params: { id: string } }>('/api/templates/:id/share', async (req, reply) => {
+    const user = currentUser(req);
+    const ok = await revokeShareCode(req.params.id, user.id);
+    if (!ok) return reply.code(404).send({ error: 'not_found', message: 'Shablon topilmadi' });
+    return { ok: true };
+  });
+
+  /* Kod bo'yicha ko'rish (nusxa olishdan oldin) */
+  app.get<{ Params: { code: string } }>('/api/templates/shared/:code', async (req, reply) => {
+    const user = currentUser(req);
+    try {
+      return { preview: await previewByCode(req.params.code, user.id) };
+    } catch (err) {
+      if (err instanceof ShareError) return reply.code(err.code === 'not_found' ? 404 : 400).send({ error: err.code, message: err.message });
+      throw err;
+    }
+  });
+
+  /* Kod bo'yicha nusxa olish */
+  app.post('/api/templates/import', async (req, reply) => {
+    const user = currentUser(req);
+    const body = z.object({ code: z.string().min(1).max(32) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'bad_request', message: 'Kodni yozing' });
+    try {
+      const { template, already } = await copyByCode(body.data.code, user.id);
+      return reply.code(already ? 200 : 201).send({ template: toTemplateDTO(template as never), already });
+    } catch (err) {
+      if (err instanceof ShareError) {
+        const status = err.code === 'not_found' ? 404 : err.code === 'own_template' ? 409 : 400;
+        return reply.code(status).send({ error: err.code, message: err.message });
+      }
+      throw err;
+    }
   });
 
   /* PDF: mode=plain (kalitsiz) | key (kalit bilan) | teacher (javoblar belgilangan) */

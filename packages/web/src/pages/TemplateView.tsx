@@ -7,6 +7,7 @@ import { api, ApiError } from '@/api';
 import { ErrorNote, IconTile, LoadingList, Page, PageHeader, SectionTitle, StickyAction } from '@/components/app';
 import { AddQuestionButton, QuestionEditor } from '@/components/question-editor';
 import { SettingsForm } from '@/components/settings-form';
+import { ShareTemplateSheet } from '@/components/share';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
@@ -297,6 +298,11 @@ export default function TemplateView() {
             <Send /> Guruhga yuborish
           </Button>
         )}
+        {template.copiedFrom && (
+          <p className="mt-3 text-center text-[12.5px] text-muted-foreground">
+            📥 {template.copiedFrom.ownerName || 'Boshqa foydalanuvchi'} ulashgan nusxa — endi sizniki
+          </p>
+        )}
         <p className="mt-3 text-center text-[12.5px] leading-relaxed text-muted-foreground">
           {hasNativeButtons ? 'Pastdagi tugma → ' : ''}Guruhni tanlaysiz → u yerda{' '}
           {untimed
@@ -343,6 +349,12 @@ export default function TemplateView() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <ShareTemplateSheet
+        template={template}
+        botUsername={botUsername}
+        onCodeChange={(code) => setTemplate((prev) => (prev ? { ...prev, shareCode: code } : prev))}
+      />
 
       {races.length > 0 && (
         <>
