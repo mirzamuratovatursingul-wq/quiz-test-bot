@@ -1,7 +1,7 @@
 import { Bot, GrammyError, HttpError } from 'grammy';
 import { config } from '../config.js';
-import { User } from '../db/models.js';
 import { logger } from '../logger.js';
+import { touchUser } from '../services/user-touch.service.js';
 import { RaceEngine } from '../race/engine.js';
 import { registerGroupHandlers } from './handlers/group.js';
 import { registerPrivateHandlers } from './handlers/private.js';
@@ -23,25 +23,10 @@ export function createBot(): BotBundle {
   const bot = new Bot(config.BOT_TOKEN);
   const engine = new RaceEngine(bot);
 
-  /* Foydalanuvchini bazada yangilab turish */
+  /* Foydalanuvchini bazada yangilab turish (ko'pi bilan 10 daqiqada bir marta) */
   bot.use(async (ctx, next) => {
     const from = ctx.from;
-    if (from && !from.is_bot) {
-      void User.updateOne(
-        { telegramId: from.id },
-        {
-          $set: {
-            firstName: from.first_name,
-            lastName: from.last_name ?? '',
-            username: from.username ?? '',
-            languageCode: from.language_code ?? 'uz',
-            lastSeenAt: new Date(),
-          },
-          $setOnInsert: { telegramId: from.id },
-        },
-        { upsert: true },
-      ).catch((err) => logger.error('Foydalanuvchini saqlashda xato', err));
-    }
+    if (from && !from.is_bot) touchUser(from);
     await next();
   });
 

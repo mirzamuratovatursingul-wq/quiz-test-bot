@@ -1,8 +1,11 @@
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import compress from '@fastify/compress';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
+import mongoose from 'mongoose';
 import fs from 'node:fs';
+import path from 'node:path';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { draftRoutes } from './routes/drafts.js';
@@ -16,6 +19,10 @@ export async function buildApi(): Promise<FastifyInstance> {
     trustProxy: true,
   });
 
+  // JSON (savollar ro'yxati) va JS/CSS gzip/brotli bilan siqiladi — Mini App tezroq ochiladi.
+  // PDF va PNG allaqachon siqilgan, 1 KB dan kichik javoblar siqilmaydi.
+  await app.register(compress, { global: true, threshold: 1024, encodings: ['br', 'gzip'] });
+
   await app.register(cors, {
     origin: true,
     credentials: true,
@@ -28,6 +35,8 @@ export async function buildApi(): Promise<FastifyInstance> {
 
   app.get('/api/health', async () => ({
     ok: true,
+    // 1 = ulangan. Server port ochgandan keyin bazaga ulanadi, shuning uchun boshida 2 (ulanmoqda) bo'lishi mumkin
+    db: mongoose.connection.readyState === 1 ? 'connected' : 'connecting',
     env: config.NODE_ENV,
     time: new Date().toISOString(),
     // Ishlab chiqishda: bot hozir qaysi Mini App manzilini ishlatayotganini tekshirish uchun
@@ -41,12 +50,22 @@ export async function buildApi(): Promise<FastifyInstance> {
 
   /* Mini App statik fayllari (bitta deploy: back + front) */
   if (config.SERVE_WEB && fs.existsSync(config.webDistDir)) {
-    await app.register(fastifyStatic, { root: config.webDistDir, prefix: '/' });
+    await app.register(fastifyStatic, {
+      root: config.webDistDir,
+      prefix: '/',
+      cacheControl: false,
+      // Vite fayl nomiga hash qo'shadi (index-BqGdLrIi.js) — ular abadiy keshlanadi;
+      // index.html esa har safar tekshiriladi, aks holda yangi deploy ko'rinmay qoladi
+      setHeaders: (res, filePath) => {
+        const isAsset = filePath.includes(`${path.sep}assets${path.sep}`);
+        res.setHeader('Cache-Control', isAsset ? 'public, max-age=31536000, immutable' : 'no-cache');
+      },
+    });
     app.setNotFoundHandler(async (req, reply) => {
       if (req.url.startsWith('/api')) {
         return reply.code(404).send({ error: 'not_found', message: 'Bunday endpoint yoʻq' });
       }
-      return reply.sendFile('index.html');
+      return reply.header('Cache-Control', 'no-cache').sendFile('index.html');
     });
     logger.info(`Mini App statik fayllari: ${config.webDistDir}`);
   } else {

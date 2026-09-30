@@ -9,8 +9,19 @@ import { getBot } from '../../bot/index.js';
 import { currentUser, requireAuth } from '../auth.js';
 import { logger } from '../../logger.js';
 import { config } from '../../config.js';
+import { shouldTouch, touchUser, userUpdate } from '../../services/user-touch.service.js';
 
-function toRaceDTO(doc: Record<string, any>): RaceDTO {
+/** Ro'yxat uchun savollarning faqat statistikasi kerak — matn va variantlar bazadan olinmaydi */
+const RACE_LIST_PROJECTION = {
+  'questions.text': 0,
+  'questions.options': 0,
+  'questions.explanation': 0,
+  'questions.optionCounts': 0,
+  'questions.pollId': 0,
+  'questions.pollMessageId': 0,
+} as const;
+
+function toRaceDTO(doc: Record<string, any>, withQuestionStats = true): RaceDTO {
   return {
     id: String(doc._id),
     templateId: String(doc.templateId),
@@ -33,7 +44,7 @@ function toRaceDTO(doc: Record<string, any>): RaceDTO {
       avgTimeMs: p.answered > 0 ? Math.round(p.totalTimeMs / p.answered) : 0,
       place: p.place || undefined,
     })),
-    questionStats: (doc.questions ?? []).map((q: Record<string, any>, index: number) => ({
+    questionStats: (withQuestionStats ? (doc.questions ?? []) : []).map((q: Record<string, any>, index: number) => ({
       index,
       text: q.text,
       correctIndex: q.correctIndex,
@@ -54,22 +65,24 @@ export async function raceRoutes(app: FastifyInstance) {
       const user = currentUser(req);
       const filter: Record<string, unknown> = { ownerId: user.id, status: 'finished' };
       if (req.query.templateId) filter.templateId = req.query.templateId;
-      const docs = await Race.find(filter)
+      const docs = await Race.find(filter, RACE_LIST_PROJECTION)
         .sort({ finishedAt: -1 })
-        .limit(Math.min(Number(req.query.limit ?? 50), 200));
-      return { races: docs.map((d) => toRaceDTO(d.toObject())) };
+        .limit(Math.min(Number(req.query.limit ?? 50), 200))
+        .lean();
+      // Ro'yxatda savollar statistikasi kerak emas — to'liq ma'lumot /api/races/:id da
+      return { races: docs.map((d) => toRaceDTO(d, false)) };
     },
   );
 
   app.get<{ Params: { id: string } }>('/api/races/:id', async (req, reply) => {
     const user = currentUser(req);
-    const doc = await Race.findById(req.params.id);
+    const doc = await Race.findById(req.params.id).lean();
     if (!doc) return reply.code(404).send({ error: 'not_found', message: 'Musobaqa topilmadi' });
     const isParticipant = doc.participants.some((p) => p.userId === user.id);
     if (doc.ownerId !== user.id && doc.hostId !== user.id && !isParticipant) {
       return reply.code(403).send({ error: 'forbidden', message: 'Ruxsat yoʻq' });
     }
-    return { race: toRaceDTO(doc.toObject()) };
+    return { race: toRaceDTO(doc) };
   });
 
   /* Musobaqa hisoboti PDF */
@@ -159,26 +172,24 @@ export async function raceRoutes(app: FastifyInstance) {
 export async function profileRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth);
 
+  /* Mini App sozlamalari — bazaga murojaatsiz (TemplateView faqat bot nomi uchun chaqiradi) */
+  app.get('/api/config', async () => ({ botUsername: config.BOT_USERNAME ?? null }));
+
   app.get('/api/me', async (req) => {
     const user = currentUser(req);
-    const [doc, templatesCount, racesCount] = await Promise.all([
-      User.findOneAndUpdate(
-        { telegramId: user.id },
-        {
-          $set: {
-            firstName: user.first_name,
-            lastName: user.last_name ?? '',
-            username: user.username ?? '',
-            photoUrl: user.photo_url ?? '',
-            lastSeenAt: new Date(),
-          },
-          $setOnInsert: { telegramId: user.id },
-        },
-        { new: true, upsert: true },
-      ),
+    const [found, templatesCount, racesCount] = await Promise.all([
+      User.findOne({ telegramId: user.id }).lean(),
       Template.countDocuments({ ownerId: user.id }),
       Race.countDocuments({ ownerId: user.id, status: 'finished' }),
     ]);
+    // Yangi foydalanuvchi darhol yaratiladi; qolganlar uchun yozish 10 daqiqada bir marta (fonda)
+    let doc = found;
+    if (!doc) {
+      shouldTouch(user);
+      doc = await User.findOneAndUpdate({ telegramId: user.id }, userUpdate(user), { new: true, upsert: true }).lean();
+    } else {
+      touchUser(user);
+    }
 
     const profile: UserProfileDTO = {
       telegramId: user.id,
@@ -199,8 +210,17 @@ export async function profileRoutes(app: FastifyInstance) {
     const user = currentUser(req);
 
     const [templates, races] = await Promise.all([
-      Template.find({ ownerId: user.id }).sort({ racesCount: -1 }).limit(5),
-      Race.find({ ownerId: user.id, status: 'finished' }).sort({ finishedAt: -1 }).limit(10),
+      // Savollar o'zi emas, faqat soni kerak
+      Template.aggregate<{ _id: unknown; title: string; racesCount: number; questionsCount: number }>([
+        { $match: { ownerId: user.id } },
+        { $sort: { racesCount: -1 } },
+        { $limit: 5 },
+        { $project: { title: 1, racesCount: 1, questionsCount: { $size: '$questions' } } },
+      ]),
+      Race.find({ ownerId: user.id, status: 'finished' }, RACE_LIST_PROJECTION)
+        .sort({ finishedAt: -1 })
+        .limit(10)
+        .lean(),
     ]);
 
     const totalParticipants = races.reduce((s, r) => s + r.participants.length, 0);
@@ -217,7 +237,7 @@ export async function profileRoutes(app: FastifyInstance) {
       topTemplates: templates.map((t) => ({
         id: String(t._id),
         title: t.title,
-        questions: t.questions.length,
+        questions: t.questionsCount,
         racesCount: t.racesCount,
       })),
       recentRaces: races.map((r) => ({

@@ -102,6 +102,15 @@ console.log('\n2) Telegram initData imzosini tekshirish');
   check('boʻsh initData rad etildi', verifyInitData('') === null);
 }
 
+{
+  // Ro'yxat yengil: savollar va asl matn yo'q, faqat sonlar
+  const draftList = await app.inject({ method: 'GET', url: '/api/drafts' });
+  const summary = draftList.json().drafts[0];
+  check('qoralamalar roʻyxatida savollar soni', summary?.questionsCount === 3, summary);
+  check('qoralamalar roʻyxatida javobsizlar soni', summary?.openCount === 0, summary);
+  check('roʻyxatda savollar va asl matn yoʻq', summary && !('questions' in summary) && !('rawText' in summary), summary);
+}
+
 console.log('\n3) Qoralamani tahrirlash (/api/drafts/:id)');
 const patchRes = await app.inject({
   method: 'PATCH',
@@ -127,6 +136,24 @@ check('qoralama oʻchdi', draftsAfter.json().drafts.length === 0);
 console.log('\n5) Shablonlar roʻyxati va sozlamalar');
 const listRes = await app.inject({ method: 'GET', url: '/api/templates' });
 check('roʻyxatda 1 ta shablon', listRes.json().templates.length === 1);
+check('roʻyxatda savollar soni (savollarning oʻzisiz)', listRes.json().templates[0].questionsCount === 3 && !('questions' in listRes.json().templates[0]));
+{
+  // Katta javob (40 savol) siqilishi kerak; 1 KB dan kichiklari siqilmaydi
+  const big = await Template.create({
+    ownerId: USER_ID,
+    title: 'Katta shablon',
+    questions: Array.from({ length: 40 }, (_, i) => ({
+      text: `${i + 1}-savol matni, yetarlicha uzun boʻlishi uchun`,
+      options: [{ text: 'Birinchi variant' }, { text: 'Ikkinchi variant' }],
+      correctIndex: 0,
+    })),
+  });
+  const gz = await app.inject({ method: 'GET', url: `/api/templates/${big._id}`, headers: { 'accept-encoding': 'gzip' } });
+  check('katta javoblar siqiladi (gzip)', gz.headers['content-encoding'] === 'gzip', gz.headers['content-encoding']);
+  await Template.deleteOne({ _id: big._id });
+}
+const cfg = await app.inject({ method: 'GET', url: '/api/config' });
+check('/api/config ishlaydi', cfg.statusCode === 200 && 'botUsername' in cfg.json(), cfg.body);
 check(
   'vaqt sozlamasi saqlandi (20 s)',
   listRes.json().templates[0].settings.timePerQuestion === 20,

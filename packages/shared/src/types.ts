@@ -104,6 +104,16 @@ export interface TemplateDTO {
   updatedAt: string;
 }
 
+/** Ro'yxat uchun: savollarning o'zi emas, faqat soni (javob hajmi o'nlab marta kichik) */
+export type TemplateSummaryDTO = Omit<TemplateDTO, 'questions'> & { questionsCount: number };
+
+/** Qoralamalar ro'yxati uchun: savollar va ogohlantirishlar o'rniga sonlar */
+export type DraftSummaryDTO = Omit<DraftDTO, 'questions' | 'warnings'> & {
+  questionsCount: number;
+  /** To'g'ri javobi belgilanmagan (yoki variantlari yetarli bo'lmagan) savollar */
+  openCount: number;
+};
+
 /** Ulashish kodi bo'yicha ko'rinish (nusxa olishdan oldin) */
 export interface SharedTemplatePreviewDTO {
   code: string;

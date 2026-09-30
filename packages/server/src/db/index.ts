@@ -15,19 +15,25 @@ export async function connectDb(): Promise<typeof mongoose> {
   });
   logger.info(`MongoDB ulandi: ${mongoose.connection.name}`);
 
-  if (config.isProd) await syncIndexes();
+  // Production'da indekslar fonda yaratiladi — server ularni kutmasdan so'rov qabul qiladi
+  if (config.isProd) void ensureIndexes();
   return mongoose;
 }
 
-/** Production'da indekslarni bir marta tekshirib chiqish (autoIndex o'chirilgani uchun) */
-async function syncIndexes(): Promise<void> {
+/**
+ * Production'da yetishmayotgan indekslarni yaratish (autoIndex o'chirilgani uchun).
+ * createIndexes mavjud indekslarni o'chirmaydi (syncIndexes'dan farqli) va bor
+ * indekslarni tez o'tkazib yuboradi.
+ */
+async function ensureIndexes(): Promise<void> {
   const names = Object.keys(mongoose.models);
+  const started = Date.now();
   try {
-    await Promise.all(names.map((name) => mongoose.models[name]?.syncIndexes()));
-    logger.info(`Indekslar sinxronlandi: ${names.join(', ')}`);
+    await Promise.all(names.map((name) => mongoose.models[name]?.createIndexes()));
+    logger.info(`Indekslar tayyor (${Date.now() - started} ms): ${names.join(', ')}`);
   } catch (err) {
     // Indeks muammosi ilovani to'xtatmasligi kerak
-    logger.warn('Indekslarni sinxronlashda muammo', err);
+    logger.warn('Indekslarni yaratishda muammo', err);
   }
 }
 

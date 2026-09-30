@@ -12,14 +12,13 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { formatTimeLimit, type DraftDTO, type TemplateDTO } from '@testrace/shared';
+import { formatTimeLimit, type DraftSummaryDTO, type TemplateSummaryDTO } from '@testrace/shared';
 import { api, ApiError } from '@/api';
 import { ErrorNote, IconTile, LoadingList, Page, PageHeader, SectionTitle } from '@/components/app';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ImportByCodeSheet } from '@/components/share';
-import { isQuestionReady } from '@/lib/questions';
 import { currentUser, tap } from '@/telegram';
 
 /** Shablonlar shu sondan ko'p bo'lsa qidiruv maydoni chiqadi */
@@ -28,8 +27,8 @@ const SEARCH_FROM = 5;
 const SOURCE_LABEL: Record<string, string> = { pdf: 'PDF', docx: 'Word', text: 'matn' };
 
 export default function Home() {
-  const [templates, setTemplates] = useState<TemplateDTO[]>([]);
-  const [drafts, setDrafts] = useState<DraftDTO[]>([]);
+  const [templates, setTemplates] = useState<TemplateSummaryDTO[]>([]);
+  const [drafts, setDrafts] = useState<DraftSummaryDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -60,7 +59,7 @@ export default function Home() {
   }, [templates, query]);
 
   const empty = !loading && !error && templates.length === 0 && drafts.length === 0;
-  const totalQuestions = templates.reduce((s, t) => s + t.questions.length, 0);
+  const totalQuestions = templates.reduce((s, t) => s + t.questionsCount, 0);
   const totalRaces = templates.reduce((s, t) => s + t.racesCount, 0);
 
   return (
@@ -93,14 +92,14 @@ export default function Home() {
           </SectionTitle>
           <div className="space-y-2">
             {drafts.map((d) => {
-              const open = d.questions.filter((q) => !isQuestionReady(q)).length;
+              const open = d.openCount;
               return (
                 <Row
                   key={d.id}
                   to={`/draft/${d.id}`}
                   icon={<IconTile emoji="📝" tone="warning" />}
                   title={d.title}
-                  meta={`${d.questions.length} ta savol · ${SOURCE_LABEL[d.sourceType] ?? 'matn'}`}
+                  meta={`${d.questionsCount} ta savol · ${SOURCE_LABEL[d.sourceType] ?? 'matn'}`}
                   badge={
                     open > 0 ? (
                       <Badge variant="warning">{open} ta javobsiz</Badge>
@@ -147,7 +146,7 @@ export default function Home() {
                 to={`/template/${t.id}`}
                 icon={<IconTile emoji="📘" />}
                 title={t.title}
-                meta={`${t.questions.length} ta savol · ⏱ ${formatTimeLimit(t.settings?.timePerQuestion)}${t.copiedFrom ? ' · 📥 nusxa' : ''}`}
+                meta={`${t.questionsCount} ta savol · ⏱ ${formatTimeLimit(t.settings?.timePerQuestion)}${t.copiedFrom ? ' · 📥 nusxa' : ''}`}
                 badge={
                   t.racesCount > 0 ? (
                     <Badge>🏁 {t.racesCount}</Badge>

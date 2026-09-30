@@ -17,6 +17,12 @@ async function main() {
     if (changed.WEBAPP_URL) void syncMenuButton();
   });
 
+  createBot();
+
+  // Port birinchi ochiladi: platforma (Railway/Render) servisni darhol "tirik" deb ko'radi.
+  // MongoDB ulanguncha kelgan so'rovlarni mongoose navbatda ushlab turadi.
+  const app = await startApi();
+
   try {
     await connectDb();
   } catch (err) {
@@ -31,9 +37,6 @@ async function main() {
     process.exit(1);
   }
 
-  createBot();
-
-  const app = await startApi();
   await startBot();
 
   const shutdown = async (signal: string) => {

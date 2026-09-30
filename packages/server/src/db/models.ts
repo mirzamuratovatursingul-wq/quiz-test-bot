@@ -134,6 +134,8 @@ const draftSchema = new Schema(
 
 // Tasdiqlanmagan qoralamalar 7 kundan keyin o'chadi
 draftSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7 * 24 * 3600 });
+// Bosh sahifa: foydalanuvchining qoralamalari, yangisi birinchi
+draftSchema.index({ ownerId: 1, createdAt: -1 });
 
 export type DraftDoc = HydratedDocument<InferSchemaType<typeof draftSchema>>;
 export const Draft = model('Draft', draftSchema);
@@ -205,6 +207,11 @@ const raceSchema = new Schema(
 
 raceSchema.index({ chatId: 1, status: 1 });
 raceSchema.index({ ownerId: 1, createdAt: -1 });
+// Profil va shablon sahifalari: egasining tugagan musobaqalari, oxirgisi birinchi
+raceSchema.index({ ownerId: 1, status: 1, finishedAt: -1 });
+raceSchema.index({ templateId: 1, status: 1, finishedAt: -1 });
+// Bot qayta ishga tushganda ochiq vaqtsiz testlarni topish
+raceSchema.index({ status: 1, untimed: 1 });
 
 export type RaceDoc = HydratedDocument<InferSchemaType<typeof raceSchema>>;
 export const Race = model('Race', raceSchema);

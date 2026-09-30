@@ -56,7 +56,7 @@ export default function TemplateView() {
     setLoading(true);
     setError(null);
     try {
-      const [t, r, me] = await Promise.all([api.template(id), api.races(id), api.me()]);
+      const [t, r, me] = await Promise.all([api.template(id), api.races(id), api.config()]);
       setTemplate(t.template);
       setKeys(t.template.questions.map(newQuestionKey));
       setNewIndex(null);

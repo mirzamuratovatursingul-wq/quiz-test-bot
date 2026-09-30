@@ -7,6 +7,7 @@ import {
   UNTIMED,
   type Question,
   type TemplateDTO,
+  type TemplateSummaryDTO,
 } from '@testrace/shared';
 import { Template, User } from '../../db/models.js';
 import { buildTestPdf } from '../../services/pdf.service.js';
@@ -100,17 +101,27 @@ export function toTemplateDTO(doc: {
 export async function templateRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth);
 
-  /* Ro'yxat */
+  /* Ro'yxat: savollarsiz, faqat soni (bosh sahifa uchun) */
   app.get('/api/templates', async (req) => {
     const user = currentUser(req);
-    const docs = await Template.find({ ownerId: user.id }).sort({ createdAt: -1 }).limit(200);
-    return { templates: docs.map((d) => toTemplateDTO(d as never)) };
+    const docs = await Template.aggregate([
+      { $match: { ownerId: user.id } },
+      { $sort: { createdAt: -1 } },
+      { $limit: 200 },
+      { $addFields: { questionsCount: { $size: '$questions' } } },
+      { $project: { questions: 0 } },
+    ]);
+    const templates: TemplateSummaryDTO[] = docs.map((d) => {
+      const { questions: _omit, ...rest } = toTemplateDTO({ ...d, questions: [] });
+      return { ...rest, questionsCount: d.questionsCount as number };
+    });
+    return { templates };
   });
 
   /* Bitta shablon */
   app.get<{ Params: { id: string } }>('/api/templates/:id', async (req, reply) => {
     const user = currentUser(req);
-    const doc = await Template.findOne({ _id: req.params.id, ownerId: user.id });
+    const doc = await Template.findOne({ _id: req.params.id, ownerId: user.id }).lean();
     if (!doc) return reply.code(404).send({ error: 'not_found', message: 'Shablon topilmadi' });
     return { template: toTemplateDTO(doc as never) };
   });

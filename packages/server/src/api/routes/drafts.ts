@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { applyAnswerKeyText, applyFirstIsCorrect, type DraftDTO, type Question } from '@testrace/shared';
+import {
+  applyAnswerKeyText,
+  applyFirstIsCorrect,
+  type DraftDTO,
+  type DraftSummaryDTO,
+  type Question,
+} from '@testrace/shared';
 import { Draft, Template, User } from '../../db/models.js';
 import { ExtractError } from '../../services/extract.service.js';
 import { importTestFile, importTestText } from '../../services/test-import.service.js';
@@ -43,16 +49,53 @@ function toDraftDTO(doc: {
 export async function draftRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth);
 
-  /* Ro'yxat */
+  /*
+   * Ro'yxat: savollar, ogohlantirishlar va asl matnsiz (rawText har birida 200 KB gacha).
+   * Bosh sahifaga faqat savollar soni va javobsizlar soni kerak.
+   */
   app.get('/api/drafts', async (req) => {
     const user = currentUser(req);
-    const docs = await Draft.find({ ownerId: user.id }).sort({ createdAt: -1 }).limit(50);
-    return { drafts: docs.map((d) => toDraftDTO(d as never)) };
+    const docs = await Draft.aggregate([
+      { $match: { ownerId: user.id } },
+      { $sort: { createdAt: -1 } },
+      { $limit: 50 },
+      {
+        $project: {
+          ownerId: 1,
+          title: 1,
+          strategy: 1,
+          sourceType: 1,
+          sourceFileName: 1,
+          createdAt: 1,
+          questionsCount: { $size: '$questions' },
+          openCount: {
+            $size: {
+              $filter: {
+                input: '$questions',
+                as: 'q',
+                cond: {
+                  $or: [
+                    { $lt: ['$$q.correctIndex', 0] },
+                    { $lt: [{ $size: '$$q.options' }, 2] },
+                    { $gte: ['$$q.correctIndex', { $size: '$$q.options' }] },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+    ]);
+    const drafts: DraftSummaryDTO[] = docs.map((d) => {
+      const { questions: _q, warnings: _w, ...rest } = toDraftDTO({ ...d, questions: [], warnings: [] });
+      return { ...rest, questionsCount: d.questionsCount as number, openCount: d.openCount as number };
+    });
+    return { drafts };
   });
 
   app.get<{ Params: { id: string } }>('/api/drafts/:id', async (req, reply) => {
     const user = currentUser(req);
-    const doc = await Draft.findOne({ _id: req.params.id, ownerId: user.id });
+    const doc = await Draft.findOne({ _id: req.params.id, ownerId: user.id }).select('-rawText').lean();
     if (!doc) return reply.code(404).send({ error: 'not_found', message: 'Qoralama topilmadi' });
     return { draft: toDraftDTO(doc as never) };
   });

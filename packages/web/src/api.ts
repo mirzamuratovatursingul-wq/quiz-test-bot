@@ -1,9 +1,11 @@
 import type {
   DraftDTO,
+  DraftSummaryDTO,
   Question,
   RaceDTO,
   SharedTemplatePreviewDTO,
   TemplateDTO,
+  TemplateSummaryDTO,
   UserProfileDTO,
 } from '@testrace/shared';
 import { initData } from '@/telegram';
@@ -69,6 +71,9 @@ export interface StatsOverview {
   totals: { races: number; participants: number; answers: number; correctRate: number };
 }
 
+/** Sessiya davomida o'zgarmaydi — bir marta so'raladi */
+let configPromise: Promise<{ botUsername: string | null }> | null = null;
+
 export const api = {
   /* Profil */
   me: () =>
@@ -76,9 +81,16 @@ export const api = {
       '/api/me',
     ),
   stats: () => request<StatsOverview>('/api/stats'),
+  config: () => {
+    configPromise ??= request<{ botUsername: string | null }>('/api/config').catch((err) => {
+      configPromise = null; // xato bo'lsa keyingi safar qayta so'raladi
+      throw err;
+    });
+    return configPromise;
+  },
 
   /* Shablonlar */
-  templates: () => request<{ templates: TemplateDTO[] }>('/api/templates'),
+  templates: () => request<{ templates: TemplateSummaryDTO[] }>('/api/templates'),
   template: (id: string) => request<{ template: TemplateDTO }>(`/api/templates/${id}`),
   updateTemplate: (id: string, patch: Partial<TemplateDTO>) =>
     request<{ template: TemplateDTO }>(`/api/templates/${id}`, {
@@ -104,7 +116,7 @@ export const api = {
     }),
 
   /* Qoralamalar */
-  drafts: () => request<{ drafts: DraftDTO[] }>('/api/drafts'),
+  drafts: () => request<{ drafts: DraftSummaryDTO[] }>('/api/drafts'),
   draft: (id: string) => request<{ draft: DraftDTO }>(`/api/drafts/${id}`),
   parseText: (text: string, title?: string) =>
     request<{ draft: DraftDTO }>('/api/parse', {

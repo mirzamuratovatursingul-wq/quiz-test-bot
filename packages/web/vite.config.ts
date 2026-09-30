@@ -30,5 +30,19 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        // Kutubxonalar alohida faylda: ilova kodi o'zgarganda (har deploy) foydalanuvchi
+        // ularni qayta yuklamaydi — brauzer keshidan oladi
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) {
+            return 'react';
+          }
+          if (id.includes('@radix-ui') || id.includes('lucide-react') || id.includes('sonner')) return 'ui';
+          return 'vendor';
+        },
+      },
+    },
   },
 });
