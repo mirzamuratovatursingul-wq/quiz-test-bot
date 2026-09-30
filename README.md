@@ -267,7 +267,8 @@ o‘chirsa yoki ulashishni to‘xtatsa ham, olingan nusxalar egalarida qoladi.
 
 **Vaqtsiz rejim.** Sozlamalarda "⏱ Vaqt" → **Vaqtsiz** tanlansa, test guruhga oddiy quiz
 so‘rovnomalari bo‘lib birdaniga yuboriladi. Vaqt chegarasi yo‘q, har kim istalgan paytda
-javob beradi, har bir to‘g‘ri javob 100 ball. Admin **«Yakunlash va natijalar»** tugmasini
+javob beradi, har bir to‘g‘ri javob 100 ball. Testni guruhga yuborgan odam (faqat u)
+**«Yakunlash va natijalar»** tugmasini
 bosganda yoki `/yakunlash` yozganda so‘rovnomalar yopiladi va reyting e’lon qilinadi.
 Bot qayta ishga tushsa (deploy), ochiq test tiklanadi va javoblar yo‘qolmaydi.
 

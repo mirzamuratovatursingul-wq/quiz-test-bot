@@ -49,7 +49,7 @@ export interface TemplateSettings {
   /**
    * Har bir savolga beriladigan vaqt (sekund, 5–120).
    * 0 — vaqtsiz: savollar guruhga oddiy so'rovnoma bo'lib birdaniga yuboriladi,
-   * natijani admin "Yakunlash" tugmasi bilan e'lon qiladi.
+   * natijani testni guruhga yuborgan odam "Yakunlash" tugmasi bilan e'lon qiladi.
    */
   timePerQuestion: number;
   /** Savollarni aralashtirish */

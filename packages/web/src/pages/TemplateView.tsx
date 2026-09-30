@@ -306,7 +306,7 @@ export default function TemplateView() {
         <p className="mt-3 text-center text-[12.5px] leading-relaxed text-muted-foreground">
           {hasNativeButtons ? 'Pastdagi tugma → ' : ''}Guruhni tanlaysiz → u yerda{' '}
           {untimed
-            ? '“Savollarni yuborish” chiqadi. Hamma savol birdaniga ketadi, natijani admin yakunlaydi.'
+            ? '“Savollarni yuborish” chiqadi. Hamma savol birdaniga ketadi, natijani testni yuborgan odam yakunlaydi.'
             : '“Boshlash” chiqadi. Musobaqani faqat guruh admini boshlaydi.'}
         </p>
       </div>

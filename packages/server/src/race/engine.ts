@@ -240,7 +240,7 @@ export class RaceEngine {
           `\u{1F4DD} Hamma savol birdaniga soʻrovnoma boʻlib chiqadi`,
           `⏳ Vaqt chegarasi yoʻq — <b>istalgan paytda</b> javob bering`,
           `\u{1F512} Har kim <b>bir marta</b> javob beradi, oʻzgartirib boʻlmaydi`,
-          `\u{1F3C1} Natijalar admin <b>Yakunlash</b>ni bosganda eʼlon qilinadi`,
+          `\u{1F3C1} Natijalarni testni yuborgan odam <b>Yakunlash</b> bilan eʼlon qiladi`,
           '',
           `\u{1F447} Guruh admini <b>Savollarni yuborish</b>ni bosadi.`,
         ]
@@ -512,7 +512,7 @@ export class RaceEngine {
           skipped > 0 ? `⚠️ ${skipped} ta savol yuborilmadi (Telegram xatosi)` : '',
           '',
           `⏳ Javob berish ochiq — vaqt chegarasi yoʻq.`,
-          `\u{1F3C1} Admin <b>Yakunlash</b>ni bosganda soʻrovnomalar yopiladi va natijalar eʼlon qilinadi.`,
+          `\u{1F3C1} Testni yuborgan odam <b>Yakunlash</b>ni bosganda natijalar eʼlon qilinadi va soʻrovnomalar yopiladi.`,
         ]
           .filter((l, i, arr) => l !== '' || arr[i - 1] !== '')
           .join('\n'),
@@ -526,7 +526,15 @@ export class RaceEngine {
     await Race.updateOne({ _id: r.raceId }, { $set: { controlMessageId: r.controlMessageId } });
   }
 
-  /** Admin "Yakunlash"ni bosdi: so'rovnomalarni yopib, natijalarni e'lon qilish */
+  /**
+   * Vaqtsiz testni yakunlash — faqat testni guruhga yuborgan odam (host).
+   *
+   * Natijalar DARHOL hisoblanib e'lon qilinadi, so'rovnomalar esa keyin fonda yopiladi.
+   * Avval har bir so'rovnoma birma-bir yopilardi: Telegram guruhda bunday amallarni
+   * daqiqasiga ~20 ta bilan cheklaydi, 20+ savolda bot daqiqalab kutib qolardi va
+   * "natijalar hisoblanmoqda…" xabari qotib turardi. Yakunlash boshlangach kelgan
+   * javoblar hisobga olinmaydi (r.stopping), shuning uchun natija o'zgarmaydi.
+   */
   async finishUntimed(
     chatId: number,
     userId: number,
@@ -537,7 +545,10 @@ export class RaceEngine {
       return { ok: false, message: 'Bu test endi faol emas.' };
     }
     if (r.status !== 'running') return { ok: false, message: 'Test hali boshlanmagan.' };
-    if (!(await this.isChatAdmin(chatId, userId))) return { ok: false, message: t.adminOnly };
+    if (userId !== r.hostId) {
+      return { ok: false, message: '\u{1F512} Natijalarni faqat testni guruhga yuborgan odam hisoblay oladi.' };
+    }
+    if (r.stopping) return { ok: false, message: 'Natijalar allaqachon hisoblanmoqda…' };
 
     // Yangi javoblarni qabul qilmaymiz, yuborish davom etayotgan bo'lsa to'xtaydi
     r.stopping = true;
@@ -547,22 +558,35 @@ export class RaceEngine {
         parse_mode: 'HTML',
       });
     }
-    await this.stopUntimedPolls(chatId, r);
 
     // Yuborilmagan savollar natijaga kirmaydi
     r.questions = r.questions.slice(0, r.sentCount);
     const total = r.questions.length;
     for (const p of r.participants.values()) p.missed = Math.max(0, total - p.answered);
 
-    void this.finish(chatId);
+    const pollMessageIds = this.detachUntimedPolls(r);
+    void this.finish(chatId).finally(() => void this.closePollsInBackground(chatId, pollMessageIds));
     return { ok: true, message: 'Yakunlandi — natijalar eʼlon qilinmoqda' };
   }
 
-  private async stopUntimedPolls(chatId: number, r: RaceRuntime) {
+  /** So'rovnomalarni javob qabul qilishdan uzish; yopish uchun xabar id larini qaytaradi */
+  private detachUntimedPolls(r: RaceRuntime): number[] {
+    const ids: number[] = [];
     for (const q of r.questions) {
       if (q.pollId) this.polls.delete(q.pollId);
-      if (!q.pollMessageId) continue;
-      await this.withRetry(() => this.bot.api.stopPoll(chatId, q.pollMessageId!)).catch(() => undefined);
+      if (q.pollMessageId) ids.push(q.pollMessageId);
+    }
+    return ids;
+  }
+
+  /**
+   * So'rovnomalarni sekin-asta yopish (Telegram cheklovidan oshmaslik uchun).
+   * Hech narsani kutdirmaydi; yopilmay qolganlari baribir javob qabul qilmaydi.
+   */
+  private async closePollsInBackground(chatId: number, messageIds: number[]) {
+    for (const id of messageIds) {
+      await this.withRetry(() => this.bot.api.stopPoll(chatId, id), 3).catch(() => undefined);
+      await sleep(UNTIMED_SEND_PAUSE_MS);
     }
   }
 
@@ -664,14 +688,49 @@ export class RaceEngine {
   /* Yakun                                                             */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Yakun: natijalarni hisoblash va e'lon qilish.
+   * Har qanday holatda (xato, Telegram cheklovi, hech kim javob bermagan) musobaqa
+   * "finished" bo'ladi va runtime tozalanadi — guruh qotib qolmaydi.
+   */
   private async finish(chatId: number) {
     const r = this.runtimes.get(chatId);
-    if (!r) return;
+    if (!r || r.status === 'finished') return;
     r.status = 'finished';
     if (r.timer) clearTimeout(r.timer);
     if (r.persistTimer) clearTimeout(r.persistTimer);
     if (r.pollId) this.polls.delete(r.pollId);
 
+    try {
+      await this.announceResults(r);
+    } catch (err) {
+      logger.error('Natijalarni eʼlon qilishda xato', err);
+      await Race.updateOne({ _id: r.raceId }, { $set: { status: 'finished', finishedAt: new Date() } }).catch(
+        () => undefined,
+      );
+      await this.withRetry(() =>
+        this.bot.api.sendMessage(
+          chatId,
+          '⚠️ Natijalarni toʻliq eʼlon qilib boʻlmadi. Natijalar shablon egasining panelida saqlandi.',
+        ),
+      ).catch(() => undefined);
+    } finally {
+      if (this.runtimes.get(chatId) === r) this.runtimes.delete(chatId);
+    }
+  }
+
+  /** Telegram'ga yuborish: 429 bo'lsa kutib qayta urinadi, boshqa xatoda null (keyingi qadam davom etadi) */
+  private async trySend<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+    try {
+      return await this.withRetry(fn);
+    } catch (err) {
+      logger.error(`${label} yuborilmadi`, err);
+      return null;
+    }
+  }
+
+  private async announceResults(r: RaceRuntime) {
+    const chatId = r.chatId;
     const ranked = assignPlaces(
       [...r.participants.values()].map((p) => ({
         ...p,
@@ -683,76 +742,85 @@ export class RaceEngine {
     await Race.updateOne({ _id: r.raceId }, { $set: { status: 'finished', finishedAt: new Date() } });
 
     const total = r.questions.length;
+    const kind = r.untimed ? 'Test' : 'Musobaqa';
+    const closeControls = (text: string) =>
+      r.controlMessageId ? this.safeEdit(chatId, r.controlMessageId, text, { parse_mode: 'HTML' }) : Promise.resolve();
 
     if (ranked.length === 0) {
-      await this.bot.api.sendMessage(
-        chatId,
-        '\u{1F3C1} Musobaqa tugadi — hech kim javob bermadi.',
+      await closeControls(`\u{1F3C1} <b>${kind} yakunlandi</b> — hech kim javob bermadi.`);
+      await this.trySend('Yakuniy xabar', () =>
+        this.bot.api.sendMessage(chatId, `\u{1F3C1} ${kind} tugadi — hech kim javob bermadi.`),
       );
-      this.runtimes.delete(chatId);
+      await Template.updateOne({ _id: r.templateId }, { $inc: { racesCount: 1 } }).catch(() => undefined);
       return;
     }
 
-    // 3 → 2 → 1
-    const podium = ranked.filter((p) => p.place <= 3).slice(0, 3);
-    const announce = await this.bot.api.sendMessage(chatId, '\u{1F3C1} <b>Yakun</b>', {
-      parse_mode: 'HTML',
-    });
-    for (const place of [3, 2, 1] as const) {
-      const winner = podium.find((p) => p.place === place);
-      if (!winner) continue;
-      await sleep(1200);
-      await this.safeEdit(
-        chatId,
-        announce.message_id,
-        [
-          '\u{1F3C1} <b>Yakun</b>',
-          '',
-          ...[3, 2, 1]
-            .filter((pl) => pl >= place)
-            .sort((a, b) => b - a)
-            .map((pl) => {
-              const w = podium.find((p) => p.place === pl);
-              return w
-                ? `${medal(pl)} ${escapeHtml(w.firstName)} — <b>${w.score}</b>`
-                : null;
-            })
-            .filter(Boolean),
-        ].join('\n'),
-        { parse_mode: 'HTML' },
-      );
-    }
+    // Podium faqat ball olganlar uchun; teng ballda bir o'rinda bir nechta kishi bo'lishi
+    // mumkin — rasm va e'londa har o'rinning birinchisi ko'rsatiladi (to'liq ro'yxat jadvalda)
+    const podium = ranked
+      .filter((p) => p.score > 0 && p.place <= 3)
+      .filter((p, i, arr) => arr.findIndex((x) => x.place === p.place) === i);
 
-    // Podium rasmi
-    try {
-      const entries: PodiumEntry[] = [];
-      for (const p of podium) {
-        entries.push({
-          place: p.place as 1 | 2 | 3,
-          name: p.firstName,
-          username: p.username || undefined,
-          score: p.score,
-          correct: p.correct,
-          total,
-          avatar: await fetchUserAvatar(this.bot.api, p.userId),
-        });
+    // 3 → 2 → 1
+    if (podium.length > 0) {
+      const announce = await this.trySend('Yakun eʼloni', () =>
+        this.bot.api.sendMessage(chatId, '\u{1F3C1} <b>Yakun</b>', { parse_mode: 'HTML' }),
+      );
+      if (announce) {
+        for (const place of [3, 2, 1] as const) {
+          if (!podium.some((p) => p.place === place)) continue;
+          await sleep(1200);
+          await this.safeEdit(
+            chatId,
+            announce.message_id,
+            [
+              '\u{1F3C1} <b>Yakun</b>',
+              '',
+              ...[3, 2, 1]
+                .filter((pl) => pl >= place)
+                .sort((a, b) => b - a)
+                .map((pl) => {
+                  const w = podium.find((p) => p.place === pl);
+                  return w ? `${medal(pl)} ${escapeHtml(w.firstName)} — <b>${w.score}</b>` : null;
+                })
+                .filter(Boolean),
+            ].join('\n'),
+            { parse_mode: 'HTML' },
+          );
+        }
       }
-      if (entries.length > 0) {
+
+      // Podium rasmi
+      try {
+        const entries: PodiumEntry[] = [];
+        for (const p of podium) {
+          entries.push({
+            place: p.place as 1 | 2 | 3,
+            name: p.firstName,
+            username: p.username || undefined,
+            score: p.score,
+            correct: p.correct,
+            total,
+            avatar: await fetchUserAvatar(this.bot.api, p.userId).catch(() => null),
+          });
+        }
         const image = await renderPodium(entries, {
           title: r.title,
           subtitle: `${total} savol · ${r.participants.size} ishtirokchi`,
         });
-        await this.bot.api.sendPhoto(chatId, new InputFile(image, 'natijalar.png'));
+        await this.trySend('Podium rasmi', () => this.bot.api.sendPhoto(chatId, new InputFile(image, 'natijalar.png')));
+      } catch (err) {
+        logger.error('Podium rasmi yaratilmadi', err);
       }
-    } catch (err) {
-      logger.error('Podium rasmi yaratilmadi', err);
     }
 
     // To'liq jadval
     const table = ranked
       .slice(0, 15)
       .map((p) => {
-        const line = `${medal(p.place)} ${escapeHtml(p.firstName)} — <b>${p.score}</b> ball · ✅ ${p.correct}/${total}`;
+        // 0 ball olganlarga medal berilmaydi (hamma 0 bo'lsa hamma "1-o'rin" bo'lib qolardi)
+        const mark = p.score > 0 ? medal(p.place) : '▫️';
+        const line = `${mark} ${escapeHtml(p.firstName)} — <b>${p.score}</b> ball · ✅ ${p.correct}/${total}`;
         if (r.untimed) return line;
         const avg = p.answered > 0 ? `${(p.totalTimeMs / p.answered / 1000).toFixed(1)}s` : '—';
         return `${line} · ⚡ ${avg}`;
@@ -769,6 +837,7 @@ export class RaceEngine {
     const totalCorrect = r.questions.reduce((s, q) => s + q.correctCount, 0);
     const accuracy = totalAnswers > 0 ? Math.round((totalCorrect / totalAnswers) * 100) : 0;
     const best = ranked[0];
+    const unanswered = r.questions.filter((q) => q.answeredCount === 0).length;
 
     // Xabar mazmunli guruhlarga bo'linadi: har guruh orasida bo'sh qator
     const sections: string[][] = [
@@ -787,10 +856,13 @@ export class RaceEngine {
       ],
       [
         `\u{1F50D} <b>Eʼtiborga loyiq</b>`,
-        best ? `\u{1F947} Eng yuqori ball: <b>${escapeHtml(best.firstName)}</b> — ${best.score}` : '',
+        best && best.score > 0
+          ? `\u{1F947} Eng yuqori ball: <b>${escapeHtml(best.firstName)}</b> — ${best.score}`
+          : '\u{1F914} Hech kim toʻgʻri javob bermadi',
         hardest && hardest.rate < 1
           ? `\u{1F525} Eng qiyin savol: <b>${hardest.i + 1}-savol</b> — ${Math.round(hardest.rate * 100)}% toʻgʻri`
           : '',
+        unanswered > 0 ? `\u{1F4ED} Hech kim javob bermagan savollar: <b>${unanswered}</b> ta` : '',
       ],
       [`\u{1F4BE} Natijalar shablon egasining panelida saqlandi.`],
     ];
@@ -800,11 +872,15 @@ export class RaceEngine {
       .filter((block) => block.trim().length > 0)
       .join('\n\n');
 
-    await this.bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' });
+    await this.trySend('Yakuniy natijalar', () => this.bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' }));
+    await closeControls(`\u{1F3C1} <b>${kind} yakunlandi</b> — natijalar pastda \u{1F447}`);
 
-    await this.updateUserStats(ranked, r);
-    await Template.updateOne({ _id: r.templateId }, { $inc: { racesCount: 1 } });
-    this.runtimes.delete(chatId);
+    try {
+      await this.updateUserStats(ranked, r);
+      await Template.updateOne({ _id: r.templateId }, { $inc: { racesCount: 1 } });
+    } catch (err) {
+      logger.error('Statistikani yangilab boʻlmadi', err);
+    }
   }
 
   private async updateUserStats(
@@ -819,7 +895,8 @@ export class RaceEngine {
           $setOnInsert: { telegramId: p.userId, firstName: p.firstName, username: p.username },
           $inc: {
             'stats.racesPlayed': 1,
-            'stats.wins': p.place === 1 ? 1 : 0,
+            // Hamma 0 ball olsa hamma "1-o'rin" bo'ladi — bu g'alaba emas
+            'stats.wins': p.place === 1 && p.score > 0 ? 1 : 0,
             'stats.totalScore': p.score,
             'stats.totalCorrect': p.correct,
             'stats.totalAnswers': p.answered,
@@ -850,7 +927,7 @@ export class RaceEngine {
     if (r.pollId) this.polls.delete(r.pollId);
     // Ochiq turgan so'rovnomani yopamiz — javob berib bo'lmasligi aniq ko'rinsin
     if (r.status === 'running' && r.untimed) {
-      await this.stopUntimedPolls(chatId, r);
+      void this.closePollsInBackground(chatId, this.detachUntimedPolls(r));
       if (r.controlMessageId) {
         await this.safeEdit(chatId, r.controlMessageId, '⏹ Test toʻxtatildi — natijalar hisoblanmadi.');
       }

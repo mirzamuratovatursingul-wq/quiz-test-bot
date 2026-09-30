@@ -86,8 +86,9 @@ export function SettingsForm({
 
       {untimed ? (
         <p className="rounded-[12px] bg-muted px-3 py-2 text-[13px] leading-relaxed text-muted-foreground">
-          📝 {perRace} ta savol so‘rovnoma bo‘lib ketma-ket yuboriladi va ochiq turadi. Natijalarni guruh
-          admini <b className="text-foreground">«Yakunlash»</b> tugmasi yoki /yakunlash bilan e’lon qiladi.
+          📝 {perRace} ta savol so‘rovnoma bo‘lib ketma-ket yuboriladi va ochiq turadi. Natijalarni testni
+          guruhga yuborgan odam <b className="text-foreground">«Yakunlash»</b> tugmasi yoki /yakunlash bilan
+          e’lon qiladi.
           Har bir to‘g‘ri javob — 100 ball.
         </p>
       ) : (
